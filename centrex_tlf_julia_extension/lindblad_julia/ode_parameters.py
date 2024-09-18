@@ -189,7 +189,15 @@ class odeParameters:
 
     @property
     def p(self):
-        return [getattr(self, p) for p in self._parameters]
+        p = [getattr(self, p) for p in self._parameters]
+        for idp, pi in enumerate(p):
+            if type(pi) == np.ndarray:
+                continue
+            elif type(pi).__module__ == "numpy":
+                p[idp] = pi.item()
+            else:
+                continue
+        return p
 
     def get_index_parameter(self, parameter, mode="python"):
         if isinstance(parameter, str):
@@ -232,7 +240,22 @@ class odeParameters:
         return True
 
     def generate_p_julia(self):
-        julia.Main.eval(f"p = {self.p}")
+        jl_string = (
+            "("
+            + ",".join(
+                [
+                    repr(pi).replace("array", "").replace("(", "").replace(")", "")
+                    # .replace("[", "(")
+                    # .replace("]", ")")
+                    if type(pi) == np.ndarray
+                    else str(pi)
+                    for pi in self.p
+                ]
+            ).replace("\n", "")
+            + ")"
+        )
+
+        julia.Main.eval(f"p = {jl_string}")
 
     def __repr__(self):
         rep = "OdeParameters("

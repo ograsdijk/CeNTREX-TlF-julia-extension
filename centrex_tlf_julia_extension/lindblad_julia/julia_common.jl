@@ -107,4 +107,14 @@ using Distributed
         Ω = rabi_from_intensity(intensity, main_coupling, D)
         return Ω
     end
+
+    """
+    gaussian_beam_rabi(x::Float64, y::Float64, intensity::Float64, xloc::Float64, yloc::Float64, σx::Float64, σy::Float64, main_coupling::Float64, D::Float64=2.6675506e-30)::Float64
+        2D gaussian beam that takes the beam size and peak intensity and converts it to a rabi rate
+    """
+    function gaussian_beam_rabi(x::Float64, y::Float64, intensity::Float64, xloc::Float64, yloc::Float64, σx::Float64, σy::Float64, main_coupling::Float64, D::Float64=2.6675506e-30)::Float64
+        intensity = gaussian_2d(x, y, intensity, xloc, yloc, σx, σy)
+        rabi = rabi_from_intensity(intensity, main_coupling, D)
+        return rabi
+    end
 end

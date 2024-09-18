@@ -22,11 +22,11 @@ class OBESystemJulia:
     ground: Sequence[states.State]
     excited: Sequence[states.State]
     QN: Sequence[states.State]
-    H_int: npt.NDArray[np.complex_]
-    V_ref_int: npt.NDArray[np.complex_]
+    H_int: npt.NDArray[np.complex128]
+    V_ref_int: npt.NDArray[np.complex128]
     couplings: List[Any]
     H_symbolic: smp.matrices.dense.MutableDenseMatrix
-    C_array: npt.NDArray[np.float_]
+    C_array: npt.NDArray[np.floating]
     system: smp.matrices.dense.MutableDenseMatrix
     code_lines: List[str]
     full_output: bool = False

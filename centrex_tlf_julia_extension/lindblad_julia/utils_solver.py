@@ -39,7 +39,7 @@ __all__ = [
 @dataclass
 class OBEProblem:
     odepars: odeParameters
-    ρ: npt.NDArray[np.complex_]
+    ρ: npt.NDArray[np.complex128]
     tspan: Union[List[float], Tuple[float]]
     name: str = "prob"
 
@@ -48,7 +48,7 @@ class OBEProblem:
 class OBEEnsembleProblem:
     problem: OBEProblem
     parameters: List[str]
-    scan_values: List[npt.NDArray[Union[np.int_, np.float_, np.complex_]]]
+    scan_values: List[npt.NDArray[Union[np.int_, np.floating, np.complex128]]]
     name: str = "ens_prob"
     output_func: Optional[str] = None
     zipped: bool = False
@@ -63,7 +63,7 @@ class OBEProblemConfig:
     callback: Optional[str] = None
     dtmin: Optional[int] = None
     maxiters: int = 100_000
-    saveat: Optional[Union[List[float], npt.NDArray[np.float_]]] = None
+    saveat: Optional[Union[List[float], npt.NDArray[np.floating]]] = None
     save_everystep: bool = True
     save_idxs: Optional[List[float]] = None
     progress: bool = False
@@ -77,15 +77,15 @@ class OBEEnsembleProblemConfig(OBEProblemConfig):
 
 @dataclass
 class OBEResult:
-    t: npt.NDArray[np.float_]
-    y: npt.NDArray[np.complex_]
+    t: npt.NDArray[np.float64]
+    y: npt.NDArray[np.complex128]
 
 
 @dataclass
 class OBEResultParameterScan:
     parameters: List[str]
-    scan_values: List[npt.NDArray[Union[np.int_, np.float_, np.complex_]]]
-    results: npt.NDArray[np.complex_]
+    scan_values: List[npt.NDArray[Union[np.int_, np.floating, np.complex128]]]
+    results: npt.NDArray[np.complex128]
     zipped: bool
 
 
@@ -101,7 +101,9 @@ def get_diagonal_indices_flattened(size, states=None, mode="python"):
 
 
 def setup_initial_condition_scan(
-    values: Union[List[Number], npt.NDArray[Union[np.int_, np.float_, np.complex_]]],
+    values: Union[
+        List[Number], npt.NDArray[Union[np.int_, np.floating, np.complex128]]
+    ],
 ) -> None:
     Main.params = values
     Main.eval("@everywhere params = $params")
@@ -118,8 +120,8 @@ def setup_parameter_scan_zipped(
     odePar: odeParameters,
     parameters: Union[str, List[str]],
     values: Union[
-        npt.NDArray[Union[np.int_, np.float_, np.complex_]],
-        List[npt.NDArray[Union[np.int_, np.float_, np.complex_]]],
+        npt.NDArray[Union[np.int_, np.floating, np.complex128]],
+        List[npt.NDArray[Union[np.int_, np.floating, np.complex128]]],
     ],
 ) -> None:
     """
@@ -146,7 +148,18 @@ def setup_parameter_scan_zipped(
             pars[idx] = f"params[i,{idN+1}]"
     params = np.array(list(zip(*values)))
 
-    _pars = "[" + ",".join([str(p) for p in pars]) + "]"
+    _pars = (
+        "("
+        + ",".join(
+            [
+                repr(pi).replace("array", "").replace("(", "").replace(")", "")
+                if type(pi) == np.ndarray
+                else str(pi)
+                for pi in pars
+            ]
+        )
+        + ")"
+    )
 
     # generate prob_func which remakes the ODE problem for
     # each different parameter set
@@ -163,7 +176,7 @@ def setup_parameter_scan_zipped(
 def setup_parameter_scan_ND(
     odePar: odeParameters,
     parameters: Union[str, List[str]],
-    values: List[npt.NDArray[Union[np.int_, np.float_, np.complex_]]],
+    values: List[npt.NDArray[Union[np.int_, np.floating, np.complex128]]],
 ) -> None:
     """
     Convenience function for generating an ND parameter scan.
@@ -373,7 +386,7 @@ def setup_discrete_callback_terminate(
 def setup_problem(
     odepars: odeParameters,
     tspan: Union[List[float], Tuple[float]],
-    ρ: npt.NDArray[np.complex_],
+    ρ: npt.NDArray[np.complex128],
     problem_name: str = "prob",
 ) -> None:
     odepars.generate_p_julia()

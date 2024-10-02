@@ -11,10 +11,10 @@ __all__ = ["system_of_equations_to_lines", "generate_preamble"]
 
 
 def generate_preamble(
-    odepars: odeParameters, transitions: Sequence[couplings.TransitionSelector]
+    odepars: odeParameters, transition_selectors: Sequence[couplings.TransitionSelector]
 ) -> str:
     # check if the symbols in transitions are defined by odepars
-    odepars.check_transition_symbols(transitions)
+    odepars.check_transition_symbols(transition_selectors)
     preamble = """function Lindblad_rhs!(du, ρ, p, t)
     \t@inbounds begin
     """
@@ -23,8 +23,16 @@ def generate_preamble(
     for par in odepars._compound_vars:
         preamble += f"\t\t{par} = {getattr(odepars, par)}\n"
 
-    for transition in transitions:
+    for transition in transition_selectors:
         preamble += f"\t\t{transition.Ω}ᶜ = conj({transition.Ω})\n"
+
+    # precompute polarization multiplication with polarization
+    # for transition in transition_selectors:
+    #     for polarization in transition.polarization_symbols:
+    #         preamble += (
+    #             f"\t\t{polarization}{transition.Ω} = {polarization} * {transition.Ω}\n"
+    #         )
+    #         preamble += f"\t\t{polarization}{transition.Ω}ᶜ = conj({polarization}{transition.Ω})\n"
 
     # remove duplicate lines (if multiple transitions have the same Rabi rate symbol or
     # detuning
@@ -32,7 +40,7 @@ def generate_preamble(
 
     # for a list of lists type inference doesn't work, setting types explicitly
     if "Array" in odepars._parameter_types:
-        for transition in transitions:
+        for transition in transition_selectors:
             preamble = preamble.replace(
                 f"{transition.Ω} ", f"{transition.Ω}::ComplexF64 "
             )
@@ -45,9 +53,21 @@ def generate_preamble(
 
 def system_of_equations_to_lines(
     system: smp.matrices.dense.MutableDenseMatrix,
+    transition_selectors: Sequence[couplings.TransitionSelector],
 ) -> List[str]:
     n_states = system.shape[0]
     ρ = generate_density_matrix_symbolic(n_states)
+
+    # generate polarization*rabi replacements
+    # pol_rabi_replacements = []
+    # for trans in transition_selectors:
+    #     for polarization in trans.polarization_symbols:
+    #         pol_rabi_replacements.append(
+    #             (f"{polarization}*{trans.Ω}", f"{polarization}{trans.Ω}")
+    #         )
+    #         pol_rabi_replacements.append(
+    #             (f"{polarization}*conj({trans.Ω})", f"{polarization}{trans.Ω}ᶜ")
+    #         )
 
     code_lines = []
     # only calculating the upper triangle and diagonal
@@ -59,6 +79,10 @@ def system_of_equations_to_lines(
                 cline = cline.replace("(t)", "")
                 cline = cline.replace("(t)", "")
                 cline = cline.replace("I", "1im")
+
+                # replace pol*rabi symbols
+                # for repl in pol_rabi_replacements:
+                #     cline = cline.replace(*repl)
                 cline += "\n"
                 for i in range(system.shape[0]):
                     for j in range(system.shape[1]):

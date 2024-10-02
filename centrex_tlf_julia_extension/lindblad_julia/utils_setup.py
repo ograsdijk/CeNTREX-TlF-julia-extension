@@ -71,7 +71,7 @@ def generate_OBE_system_julia(
     ode_parameters: odeParameters,
 ) -> OBESystemJulia:
     preamble = generate_preamble(ode_parameters, transition_selectors)
-    code_lines = system_of_equations_to_lines(obe_system.system)
+    code_lines = system_of_equations_to_lines(obe_system.system, transition_selectors)
 
     return OBESystemJulia(
         QN=obe_system.QN,
@@ -99,17 +99,16 @@ def setup_OBE_system_julia(
     Γ: float = hamiltonian.Γ,
     verbose: bool = False,
 ) -> OBESystemJulia:
+    if n_procs is None:
+        n_procs = cast(int, psutil.cpu_count(logical=False) + 1)
     if verbose:
-        print("setup_OBE_system_julia: 1/3 -> generating OBESystemJulia")
+        print(f"setup_OBE_system_julia: 1/3 -> Initializing Julia on {n_procs} cores")
+    initialize_julia(nprocs=n_procs, verbose=verbose)
+    if verbose:
+        print("setup_OBE_system_julia: 2/3 -> generating OBESystemJulia")
     obe_system_julia = generate_OBE_system_julia(
         obe_system, transition_selectors, ode_parameters
     )
-    if n_procs is None:
-        n_procs = cast(int, psutil.cpu_count(logical=False) + 1)
-
-    if verbose:
-        print(f"setup_OBE_system_julia: 2/3 -> Initializing Julia on {n_procs} cores")
-    initialize_julia(nprocs=n_procs, verbose=verbose)
     if verbose:
         print(
             "setup_OBE_system_julia: 3/3 -> Defining the ODE equation and"

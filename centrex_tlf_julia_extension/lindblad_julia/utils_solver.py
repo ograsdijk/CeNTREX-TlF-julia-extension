@@ -480,7 +480,7 @@ def _generate_problem_solve_string(
 ) -> str:
     save_idxs = "nothing" if config.save_idxs is None else str(config.save_idxs)
     force_dtmin = "false" if config.dtmin == 0 else "true"
-    callback = "nothing" if config.callback is None else config.callback.function
+    callback = "nothing" if config.callback is None else config.callback.name
     solve_string = f"""
     sol = solve(
         {problem.name},
@@ -518,7 +518,7 @@ def _generate_problem_parameter_scan_solve_string(
     )
     save_idxs = "nothing" if config.save_idxs is None else str(config.save_idxs)
 
-    callback = "nothing" if config.callback is None else config.callback.function
+    callback = "nothing" if config.callback is None else config.callback.name
 
     solve_string = f"""
     sol = solve(

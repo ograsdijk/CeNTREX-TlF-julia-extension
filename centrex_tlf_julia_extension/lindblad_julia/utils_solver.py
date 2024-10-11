@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from numbers import Number
 from typing import List, Optional, Sequence, Tuple, Union
 
@@ -39,18 +39,36 @@ __all__ = [
 @dataclass
 class OBEProblem:
     odepars: odeParameters
-    ρ: npt.NDArray[np.complex_]
+    ρ: npt.NDArray[np.complex128]
     tspan: Union[List[float], Tuple[float]]
     name: str = "prob"
+
+
+@dataclass
+class CallbackFunction:
+    name: str
+    function: str
+
+
+@dataclass
+class ProblemFunction:
+    name: str
+    function: str
+
+
+@dataclass
+class OutputFunction:
+    name: str
+    function: str
 
 
 @dataclass
 class OBEEnsembleProblem:
     problem: OBEProblem
     parameters: List[str]
-    scan_values: List[npt.NDArray[Union[np.int_, np.float_, np.complex_]]]
+    scan_values: List[npt.NDArray[Union[np.int_, np.floating, np.complex128]]]
     name: str = "ens_prob"
-    output_func: Optional[str] = None
+    output_func: Optional[OutputFunction] = None
     zipped: bool = False
 
 
@@ -60,12 +78,12 @@ class OBEProblemConfig:
     abstol: float = 1e-7
     reltol: float = 1e-4
     dt: float = 1e-8
-    callback: Optional[str] = None
-    dtmin: Optional[int] = None
+    callback: Optional[CallbackFunction] = ""
+    dtmin: float = 0
     maxiters: int = 100_000
-    saveat: Optional[Union[List[float], npt.NDArray[np.float_]]] = None
+    saveat: Union[List[float], npt.NDArray[np.floating]] = field(default_factory=list)
     save_everystep: bool = True
-    save_idxs: Optional[List[float]] = None
+    save_idxs: Optional[List[int]] = None
     progress: bool = False
 
 
@@ -77,16 +95,33 @@ class OBEEnsembleProblemConfig(OBEProblemConfig):
 
 @dataclass
 class OBEResult:
-    t: npt.NDArray[np.float_]
-    y: npt.NDArray[np.complex_]
+    t: npt.NDArray[np.float64]
+    y: npt.NDArray[np.complex128]
 
 
 @dataclass
 class OBEResultParameterScan:
     parameters: List[str]
-    scan_values: List[npt.NDArray[Union[np.int_, np.float_, np.complex_]]]
-    results: npt.NDArray[np.complex_]
+    scan_values: List[npt.NDArray[Union[np.int_, np.floating, np.complex128]]]
+    results: npt.NDArray[np.complex128]
     zipped: bool
+
+
+def remove_leading_spaces_to_align(multiline_string: str) -> str:
+    lines = multiline_string.splitlines()
+
+    # Find the minimum number of leading spaces in all non-empty lines
+    min_spaces = min(
+        len(line) - len(line.lstrip(" ")) for line in lines if line.strip()
+    )
+
+    # Remove exactly 'min_spaces' number of leading spaces from each line
+    aligned_lines = [
+        line[min_spaces:] if line.startswith(" " * min_spaces) else line
+        for line in lines
+    ]
+
+    return "\n".join(aligned_lines)
 
 
 def get_diagonal_indices_flattened(size, states=None, mode="python"):
@@ -101,27 +136,31 @@ def get_diagonal_indices_flattened(size, states=None, mode="python"):
 
 
 def setup_initial_condition_scan(
-    values: Union[List[Number], npt.NDArray[Union[np.int_, np.float_, np.complex_]]]
-) -> None:
+    values: Union[
+        List[Number], npt.NDArray[Union[np.int_, np.floating, np.complex128]]
+    ],
+    name: str = "prob_func",
+) -> ProblemFunction:
     Main.params = values
     Main.eval("@everywhere params = $params")
-    Main.eval(
-        """
-    @everywhere function prob_func(prob,i,repeat)
+    function_str = f"""
+    @everywhere function {name}(prob,i,repeat)
         remake(prob,u0=params[i])
-    end
-    """
-    )
+    end"""
+    Main.eval(function_str)
+    function_str = remove_leading_spaces_to_align(function_str)
+    return ProblemFunction(name=name, function=function_str)
 
 
 def setup_parameter_scan_zipped(
     odePar: odeParameters,
     parameters: Union[str, List[str]],
     values: Union[
-        npt.NDArray[Union[np.int_, np.float_, np.complex_]],
-        List[npt.NDArray[Union[np.int_, np.float_, np.complex_]]],
+        npt.NDArray[Union[np.int_, np.floating, np.complex128]],
+        List[npt.NDArray[Union[np.int_, np.floating, np.complex128]]],
     ],
-) -> None:
+    name: str = "prob_func",
+) -> ProblemFunction:
     """
     Convenience function for initializing a 1D parameter scan over
     multiple parameters, with each parameter scanning over a different
@@ -146,25 +185,39 @@ def setup_parameter_scan_zipped(
             pars[idx] = f"params[i,{idN+1}]"
     params = np.array(list(zip(*values)))
 
-    _pars = "[" + ",".join([str(p) for p in pars]) + "]"
+    _pars = (
+        "("
+        + ",".join(
+            [
+                repr(pi).replace("array", "").replace("(", "").replace(")", "")
+                if type(pi) == np.ndarray
+                else str(pi)
+                for pi in pars
+            ]
+        )
+        + ")"
+    )
 
     # generate prob_func which remakes the ODE problem for
     # each different parameter set
-    setup_initial_condition_scan(params)
-    Main.eval(
-        f"""
+    Main.params = params
+    Main.eval("@everywhere params = $params")
+    function_str = f"""
     @everywhere function prob_func(prob, i, repeat)
         remake(prob, p = {_pars})
     end
     """
-    )
+    Main.eval(function_str)
+
+    function_str = remove_leading_spaces_to_align(function_str)
+    return ProblemFunction(name=name, function=function_str)
 
 
 def setup_parameter_scan_ND(
     odePar: odeParameters,
     parameters: Union[str, List[str]],
-    values: List[npt.NDArray[Union[np.int_, np.float_, np.complex_]]],
-) -> None:
+    values: List[npt.NDArray[Union[np.int_, np.floating, np.complex128]]],
+) -> ProblemFunction:
     """
     Convenience function for generating an ND parameter scan.
     For each parameter a list or np.ndarray of values is supplied,
@@ -180,13 +233,13 @@ def setup_parameter_scan_ND(
     # create all possible combinations between parameter values with meshgrid
     params = np.array(np.meshgrid(*values, indexing="ij")).T.reshape(-1, len(values))
 
-    setup_parameter_scan_zipped(odePar, parameters, params.T)
+    return setup_parameter_scan_zipped(odePar, parameters, params.T)
 
 
 def setup_ratio_calculation_state_idxs(
     states: Optional[Sequence[int]] = None,
     output_func: Optional[str] = None,
-) -> str:
+) -> OutputFunction:
     if output_func is None:
         output_func = "output_func"
     if states is None:
@@ -194,8 +247,7 @@ def setup_ratio_calculation_state_idxs(
     else:
         cmd = f"real(sum(sol.u[end][{states}]))/real(sum(sol.u[1][{states}]))"
 
-    Main.eval(
-        f"""
+    function_str = f"""
     @everywhere function {output_func}(sol,i)
         if size(sol.u)[1] == 1
             return NaN, false
@@ -204,14 +256,16 @@ def setup_ratio_calculation_state_idxs(
             return val, false
         end
     end"""
-    )
-    return output_func
+
+    function_str = remove_leading_spaces_to_align(function_str)
+    Main.eval(function_str)
+    return OutputFunction(name=output_func, function=function_str)
 
 
 def setup_ratio_calculation(
     states: Union[Sequence[int], Sequence[Sequence[int]]],
     output_func: Optional[str] = None,
-) -> str:
+) -> OutputFunction:
     if output_func is None:
         output_func = "output_func"
     cmd = ""
@@ -228,8 +282,7 @@ def setup_ratio_calculation(
             f"sum(real(diag(sol.u[end])[{states}]))/sum(real(diag(sol.u[1])[{states}]))"
         )
 
-    Main.eval(
-        f"""
+    function_str = f"""
     @everywhere function {output_func}(sol,i)
         if size(sol.u)[1] == 1
             return NaN, false
@@ -238,13 +291,14 @@ def setup_ratio_calculation(
             return val, false
         end
     end"""
-    )
-    return output_func
+    function_str = remove_leading_spaces_to_align(function_str)
+    Main.eval(function_str)
+    return OutputFunction(name=output_func, function=function_str)
 
 
 def setup_state_integral_calculation_state_idxs(
     output_func: Optional[str] = None, nphotons: bool = False, Γ: Optional[float] = None
-) -> str:
+) -> OutputFunction:
     """Setup an integration output_function for an EnsembleProblem.
     Uses trapezoidal integration to integrate the states.
 
@@ -256,36 +310,36 @@ def setup_state_integral_calculation_state_idxs(
                                 loaded into Julia globals
     """
     if output_func is None:
-        _output_func = "output_func"
+        output_func = "output_func"
     else:
-        _output_func = output_func
+        output_func = output_func
+
     if nphotons & Main.eval("@isdefined Γ"):
-        Main.eval(
-            f"""
-        @everywhere function {_output_func}(sol,i)
+        function_str = f"""
+        @everywhere function {output_func}(sol,i)
             return Γ.*trapz(sol.t, [real(sum(sol.u[j])) for j in 1:size(sol)[2]]), false
         end"""
-        )
+        Main.eval(function_str)
     else:
         if nphotons:
             assert (
                 Γ is not None
             ), "Γ not defined as a global in Julia and not supplied to function"
             Main.eval(f"@everywhere Γ = {Γ}")
-            Main.eval(
-                f"""
-            @everywhere function {_output_func}(sol,i)
+            function_str = f"""
+            @everywhere function {output_func}(sol,i)
                 return {Γ}.*trapz(sol.t, [real(sum(sol.u[j])) for j in 1:size(sol)[2]]), false
             end"""
-            )
+            Main.eval(function_str)
         else:
-            Main.eval(
-                f"""
-            @everywhere function {_output_func}(sol,i)
+            function_str = f"""
+            @everywhere function {output_func}(sol,i)
                 return trapz(sol.t, [real(sum(sol.u[j])) for j in 1:size(sol)[2]]), false
             end"""
-            )
-    return _output_func
+            Main.eval(function_str)
+
+    function_str = remove_leading_spaces_to_align(function_str)
+    return OutputFunction(name=output_func, function=function_str)
 
 
 def setup_state_integral_calculation(
@@ -293,7 +347,7 @@ def setup_state_integral_calculation(
     output_func: Optional[str] = None,
     nphotons: bool = False,
     Γ: Optional[float] = None,
-) -> str:
+) -> OutputFunction:
     """Setup an integration output_function for an EnsembleProblem.
     Uses trapezoidal integration to integrate the states.
 
@@ -305,41 +359,40 @@ def setup_state_integral_calculation(
                                 loaded into Julia globals
     """
     if output_func is None:
-        _output_func = "output_func"
+        output_func = "output_func"
     else:
-        _output_func = output_func
+        output_func = output_func
     if nphotons & Main.eval("@isdefined Γ"):
-        Main.eval(
-            f"""
-        @everywhere function {_output_func}(sol,i)
+        function_str = f"""
+        @everywhere function {output_func}(sol,i)
             return Γ.*trapz(sol.t, [real(sum(diag(sol.u[j])[{states}])) for j in 1:size(sol)[3]]), false
         end"""
-        )
+        Main.eval(function_str)
     else:
         if nphotons:
             assert (
                 Γ is not None
             ), "Γ not defined as a global in Julia and not supplied to function"
             Main.eval(f"@everywhere Γ = {Γ}")
-            Main.eval(
-                f"""
-            @everywhere function {_output_func}(sol,i)
+            function_str = f"""
+            @everywhere function {output_func}(sol,i)
                 return {Γ}.*trapz(sol.t, [real(sum(diag(sol.u[j])[{states}])) for j in 1:size(sol)[3]]), false
             end"""
-            )
+            Main.eval(function_str)
         else:
-            Main.eval(
-                f"""
-            @everywhere function {_output_func}(sol,i)
+            function_str = f"""
+            @everywhere function {output_func}(sol,i)
                 return trapz(sol.t, [real(sum(diag(sol.u[j])[{states}])) for j in 1:size(sol)[3]]), false
             end"""
-            )
-    return _output_func
+            Main.eval(function_str)
+
+    function_str = remove_leading_spaces_to_align(function_str)
+    return OutputFunction(name=output_func, function=function_str)
 
 
 def setup_discrete_callback_terminate(
     odepars: odeParameters, stop_expression: str, callback_name: Optional[str] = None
-) -> str:
+) -> CallbackFunction:
     # parse expression string to sympy equation
     expression = smp.parsing.sympy_parser.parse_expr(stop_expression)
     # extract symbols in expression and convert to a list of strings
@@ -357,23 +410,23 @@ def setup_discrete_callback_terminate(
     for idx, sym in zip(indices, symbols_in_expression):
         stop_expression = stop_expression.replace(str(sym), f"integrator.p[{idx}]")
     if callback_name is None:
-        _callback_name = "cb"
+        callback_name = "cb"
     else:
-        _callback_name = callback_name
-    Main.eval(
-        f"""
+        callback_name = callback_name
+    function_str = f"""
         @everywhere condition(u,t,integrator) = {stop_expression}
         @everywhere affect!(integrator) = terminate!(integrator)
-        {_callback_name} = DiscreteCallback(condition, affect!)
+        {callback_name} = DiscreteCallback(condition, affect!)
     """
-    )
-    return _callback_name
+    function_str = remove_leading_spaces_to_align(function_str)
+    Main.eval(function_str)
+    return CallbackFunction(name=callback_name, function=function_str)
 
 
 def setup_problem(
     odepars: odeParameters,
     tspan: Union[List[float], Tuple[float]],
-    ρ: npt.NDArray[np.complex_],
+    ρ: npt.NDArray[np.complex128],
     problem_name: str = "prob",
 ) -> None:
     odepars.generate_p_julia()
@@ -397,7 +450,7 @@ def setup_problem_parameter_scan(scan: OBEEnsembleProblem) -> None:
     zipped = scan.zipped
     parameters = scan.parameters
     values = scan.scan_values
-    output_func = scan.output_func
+    output_func = scan.output_func.name if scan.output_func is not None else "nothing"
 
     setup_problem(odepars, tspan, ρ, problem_name)
     if zipped:
@@ -422,100 +475,75 @@ def setup_problem_parameter_scan(scan: OBEEnsembleProblem) -> None:
         )
 
 
+def _generate_problem_solve_string(
+    problem: OBEProblem, config: OBEEnsembleProblemConfig
+) -> str:
+    save_idxs = "nothing" if config.save_idxs is None else str(config.save_idxs)
+    force_dtmin = "false" if config.dtmin == 0 else "true"
+    callback = "nothing" if config.callback is None else config.callback.name
+    solve_string = f"""
+    sol = solve(
+        {problem.name},
+        {config.method},
+        progress={str(config.progress).lower()},
+        dt={config.dt},
+        abstol={config.abstol},
+        reltol={config.reltol},
+        callback={callback},
+        saveat={config.saveat},
+        save_idxs={save_idxs},
+        dtmin={config.dtmin},
+        force_dtmin={force_dtmin},
+        save_everystep={str(config.save_everystep).lower()},
+        maxiters={config.maxiters}
+    )
+    """
+
+    return remove_leading_spaces_to_align(solve_string)
+
+
 def solve_problem(
     problem: OBEProblem,
     config: OBEProblemConfig = OBEProblemConfig(),
 ) -> None:
-    method = config.method
-    abstol = config.abstol
-    reltol = config.reltol
-    dt = config.dt
-    callback = config.callback
-    dtmin = config.dtmin
-    maxiters = config.maxiters
-    saveat = config.saveat
-    progress = config.progress
-    save_everystep = config.save_everystep
-    save_idxs = config.save_idxs
+    solve_string = _generate_problem_solve_string(problem, config)
+    Main.eval(f"{solve_string}; tmp=0;")
 
-    force_dtmin = "false" if dtmin is None else "true"
-    _dtmin = "nothing" if dtmin is None else str(dtmin)
-    _saveat = "[]" if saveat is None else str(saveat)
-    _save_idxs = "nothing" if save_idxs is None else str(save_idxs)
 
-    if callback is not None:
-        Main.eval(
-            f"""
-            sol = solve({problem.name}, {method}, abstol = {abstol},
-                        reltol = {reltol}, dt = {dt},
-                        progress = {str(progress).lower()},
-                        callback = {callback}, saveat = {_saveat},
-                        dtmin = {_dtmin}, maxiters = {maxiters},
-                        force_dtmin = {force_dtmin}, save_idxs = {_save_idxs},
-                        save_everystep = {str(save_everystep).lower()}
-                    )
-        """
-        )
-    else:
-        Main.eval(
-            f"""
-            sol = solve({problem.name}, {method}, abstol = {abstol},
-                        reltol = {reltol}, dt = {dt},
-                        progress = {str(progress).lower()}, saveat = {_saveat},
-                        dtmin = {_dtmin}, maxiters = {maxiters},
-                        force_dtmin = {force_dtmin}, save_idxs = {_save_idxs},
-                        save_everystep = {str(save_everystep).lower()}
-                    )
-        """
-        )
+def _generate_problem_parameter_scan_solve_string(
+    problem: OBEEnsembleProblem, config: OBEEnsembleProblemConfig
+) -> str:
+    trajectories = (
+        "size(params)[1]" if config.trajectories is None else str(config.trajectories)
+    )
+    save_idxs = "nothing" if config.save_idxs is None else str(config.save_idxs)
+
+    callback = "nothing" if config.callback is None else config.callback.name
+
+    solve_string = f"""
+    sol = solve(
+        {problem.name},
+        {config.method},
+        {config.distributed_method},
+        abstol = {config.abstol},
+        reltol = {config.reltol},
+        dt = {config.dt},
+        trajectories = {trajectories},
+        callback = {callback},
+        save_everystep = {str(config.save_everystep).lower()},
+        saveat = {config.saveat},
+        save_idxs = {save_idxs}
+    )
+    """
+    return remove_leading_spaces_to_align(solve_string)
 
 
 def solve_problem_parameter_scan(
-    scan: OBEEnsembleProblem,
+    problem: OBEEnsembleProblem,
     config: OBEEnsembleProblemConfig = OBEEnsembleProblemConfig(),
 ) -> None:
-    ensemble_problem_name = scan.name
-
-    method = config.method
-    abstol = config.abstol
-    reltol = config.reltol
-    dt = config.dt
-    callback = config.callback
-    # dtmin = config.dtmin
-    # maxiters = config.maxiters
-    saveat = config.saveat
-    trajectories = config.trajectories
-    save_idxs = config.save_idxs
-    distributed_method = config.distributed_method
-    save_everystep = config.save_everystep
-
-    _trajectories = "size(params)[1]" if trajectories is None else str(trajectories)
-    _saveat = "[]" if saveat is None else str(saveat)
-    _save_idxs = "nothing" if save_idxs is None else str(save_idxs)
-    if callback is not None:
-        Main.eval(
-            f"""
-            sol = solve({ensemble_problem_name}, {method}, {distributed_method},
-                        abstol = {abstol}, reltol = {reltol}, dt = {dt},
-                        trajectories = {_trajectories}, callback = {callback},
-                        save_everystep = {str(save_everystep).lower()},
-                        saveat = {_saveat}, save_idxs = {_save_idxs}
-                    );
-            tmp = 0;
-        """
-        )
-    else:
-        Main.eval(
-            f"""
-            sol = solve({ensemble_problem_name}, {method}, {distributed_method},
-                        abstol = {abstol}, reltol = {reltol}, dt = {dt},
-                        trajectories = {_trajectories},
-                        save_everystep = {str(save_everystep).lower()},
-                        saveat = {_saveat}, save_idxs = {_save_idxs}
-                    );
-            tmp = 0;
-        """
-        )
+    solve_string = _generate_problem_parameter_scan_solve_string(problem, config)
+    Main.eval(f"{solve_string}; tmp=0;")
 
 
 def get_results_single() -> OBEResult:

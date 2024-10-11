@@ -13,6 +13,20 @@ using Distributed
     end
 
     """
+        gaussian_2d_rotated(x::Float64, y::Float64, amplitude::Float64, μx::Float64, μy::Float64, σx::Float64, σy::Float64, θ::Float64)::Float64
+
+    Compute the rotated 2D gaussian at point x,y for an amplitude a, mean value μx and μy, standard deviation σx and σy
+    and rotation angle θ
+    """
+    function gaussian_2d_rotated(x::Float64, y::Float64, amplitude::Float64, μx::Float64, μy::Float64, σx::Float64, σy::Float64, θ::Float64)::Float64
+        a = cos(θ)^2 / (2*σx^2) + sin(θ)^2 / (2*σy^2)
+        b = sin(2*θ) / (2*σx^2) - sin(2*θ) / (2*σy^2)
+        c = sin(θ)^2 / (2*σx^2) + cos(θ)^2 / (2*σy^2)
+
+        amplitude.*exp(- a*(x-μx)^2 - b*(x-μx)*(y-μy) - c*(y-μy)^2)
+    end
+
+    """
         phase_modulation(t::Float64, β::Float64, ω::Float64)::ComplexF64
 
     Compute phase modulation at frequency ω with a modudulation strength β at time t and returns the relative electric field.
@@ -31,6 +45,14 @@ using Distributed
         0.5.*(1 .+ squarewave(ω.*t .+ phase))
     end
 
+    """
+        resonant_switching(t::Float64, ω::Float64, phase::Float64)
+
+    generate the polarization coming from a resonant EOM
+    """
+    function resonant_switching(t::Float64, ω::Float64, phase::Float64)::Float64
+        -cos(pi*(1 .+ cos(ω .* t .+ phase))/2)/2 + 1/2
+    end
     """
         sawtooth_wave(t::Float64, ω::Float64, phase::Float64)::Float64
 
@@ -85,5 +107,15 @@ using Distributed
         intensity = multipass_2d_intensity(x, y, intensities, xlocs, ylocs, σx, σy)
         Ω = rabi_from_intensity(intensity, main_coupling, D)
         return Ω
+    end
+
+    """
+    gaussian_beam_rabi(x::Float64, y::Float64, intensity::Float64, xloc::Float64, yloc::Float64, σx::Float64, σy::Float64, main_coupling::Float64, D::Float64=2.6675506e-30)::Float64
+        2D gaussian beam that takes the beam size and peak intensity and converts it to a rabi rate
+    """
+    function gaussian_beam_rabi(x::Float64, y::Float64, intensity::Float64, xloc::Float64, yloc::Float64, σx::Float64, σy::Float64, main_coupling::Float64, D::Float64=2.6675506e-30)::Float64
+        intensity = gaussian_2d(x, y, intensity, xloc, yloc, σx, σy)
+        rabi = rabi_from_intensity(intensity, main_coupling, D)
+        return rabi
     end
 end

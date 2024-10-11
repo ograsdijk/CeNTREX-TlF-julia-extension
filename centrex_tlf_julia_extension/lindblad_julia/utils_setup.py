@@ -6,6 +6,7 @@ import numpy.typing as npt
 import psutil
 import sympy as smp
 from centrex_tlf import couplings, hamiltonian, states
+from centrex_tlf.couplings import CouplingFields
 from centrex_tlf.lindblad import OBESystem, utils_decay
 from julia import Main
 
@@ -21,18 +22,18 @@ class OBESystemJulia:
     ground: Sequence[states.State]
     excited: Sequence[states.State]
     QN: Sequence[states.State]
-    H_int: npt.NDArray[np.complex_]
-    V_ref_int: npt.NDArray[np.complex_]
+    H_int: npt.NDArray[np.complex128]
+    V_ref_int: npt.NDArray[np.complex128]
     couplings: List[Any]
     H_symbolic: smp.matrices.dense.MutableDenseMatrix
-    C_array: npt.NDArray[np.float_]
+    C_array: npt.NDArray[np.floating]
     system: smp.matrices.dense.MutableDenseMatrix
     code_lines: List[str]
     full_output: bool = False
     preamble: str = ""
     QN_original: Optional[Sequence[states.State]] = None
     decay_channels: Optional[Sequence[utils_decay.DecayChannel]] = None
-    couplings_original: Optional[Sequence[List[Any]]] = None
+    couplings_original: Optional[Sequence[CouplingFields]] = None
 
     def __repr__(self) -> str:
         ground = [s.largest for s in self.ground]
@@ -70,7 +71,7 @@ def generate_OBE_system_julia(
     ode_parameters: odeParameters,
 ) -> OBESystemJulia:
     preamble = generate_preamble(ode_parameters, transition_selectors)
-    code_lines = system_of_equations_to_lines(obe_system.system)
+    code_lines = system_of_equations_to_lines(obe_system.system, transition_selectors)
 
     return OBESystemJulia(
         QN=obe_system.QN,
@@ -98,17 +99,16 @@ def setup_OBE_system_julia(
     Γ: float = hamiltonian.Γ,
     verbose: bool = False,
 ) -> OBESystemJulia:
+    if n_procs is None:
+        n_procs = cast(int, psutil.cpu_count(logical=False) + 1)
     if verbose:
-        print("setup_OBE_system_julia: 1/3 -> generating OBESystemJulia")
+        print(f"setup_OBE_system_julia: 1/3 -> Initializing Julia on {n_procs} cores")
+    initialize_julia(nprocs=n_procs, verbose=verbose)
+    if verbose:
+        print("setup_OBE_system_julia: 2/3 -> generating OBESystemJulia")
     obe_system_julia = generate_OBE_system_julia(
         obe_system, transition_selectors, ode_parameters
     )
-    if n_procs is None:
-        n_procs = cast(int, psutil.cpu_count(logical=False) + 1)
-
-    if verbose:
-        print(f"setup_OBE_system_julia: 2/3 -> Initializing Julia on {n_procs} cores")
-    initialize_julia(nprocs=n_procs, verbose=verbose)
     if verbose:
         print(
             "setup_OBE_system_julia: 3/3 -> Defining the ODE equation and"

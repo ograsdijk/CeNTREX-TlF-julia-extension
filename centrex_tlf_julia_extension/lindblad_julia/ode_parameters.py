@@ -11,6 +11,7 @@ __all__ = ["odeParameters", "generate_ode_parameters"]
 
 julia_funcs = [
     "gaussian_2d",
+    "gaussian_2d_rotated",
     "phase_modulation",
     "square_wave",
     "multipass_2d_intensity",
@@ -18,6 +19,7 @@ julia_funcs = [
     "variable_on_off",
     "rabi_from_intensity",
     "multipass_2d_rabi",
+    "resonant_switching",
 ]
 
 type_conv = {
@@ -49,8 +51,6 @@ class odeParameters:
             kwargs = {par: 0.0 for par in args[0]}
             odeParameters(**kwargs)
 
-        # kwargs = self._check_for_density(kwargs)
-        # kwargs = self._check_for_states(kwargs)
         self._parameters = [
             key for key, val in kwargs.items() if not isinstance(val, str)
         ]
@@ -81,25 +81,6 @@ class odeParameters:
             if type_conv.get(type(getattr(self, par)).__name__) == "Array"
         )
 
-    def _check_for_density(self, kwargs):
-        assert "ρ" in kwargs.keys(), "Supply an initial density ρ to odeParameters"
-        self.ρ = kwargs.get("ρ")
-        del kwargs["ρ"]
-        return kwargs
-
-    def _check_for_states(self, kwargs):
-        assert (
-            "ground" in kwargs.keys()
-        ), "Supply ground states `ground` to odeParameters"
-        self.ground = kwargs.get("ground")
-        del kwargs["ground"]
-        assert (
-            "excited" in kwargs.keys()
-        ), "Supply excited states `excited` to odeParameters"
-        self.excited = kwargs.get("excited")
-        del kwargs["excited"]
-        return kwargs
-
     def __setattr__(self, name: str, value):
         if name in [
             "_parameters",
@@ -108,9 +89,6 @@ class odeParameters:
             "_array_types",
         ]:
             super(odeParameters, self).__setattr__(name, value)
-        elif name == "ρ":
-            super(odeParameters, self).__setattr__(name, value)
-        elif name in ["ground", "excited"]:
             super(odeParameters, self).__setattr__(name, value)
         elif name in self._parameters:
             assert not isinstance(
@@ -211,7 +189,15 @@ class odeParameters:
 
     @property
     def p(self):
-        return [getattr(self, p) for p in self._parameters]
+        p = [getattr(self, p) for p in self._parameters]
+        for idp, pi in enumerate(p):
+            if type(pi) == np.ndarray:
+                continue
+            elif type(pi).__module__ == "numpy":
+                p[idp] = pi.item()
+            else:
+                continue
+        return p
 
     def get_index_parameter(self, parameter, mode="python"):
         if isinstance(parameter, str):
@@ -254,7 +240,22 @@ class odeParameters:
         return True
 
     def generate_p_julia(self):
-        julia.Main.eval(f"p = {self.p}")
+        jl_string = (
+            "("
+            + ",".join(
+                [
+                    repr(pi).replace("array", "").replace("(", "").replace(")", "")
+                    # .replace("[", "(")
+                    # .replace("]", ")")
+                    if type(pi) == np.ndarray
+                    else str(pi)
+                    for pi in self.p
+                ]
+            ).replace("\n", "")
+            + ")"
+        )
+
+        julia.Main.eval(f"p = {jl_string}")
 
     def __repr__(self):
         rep = "OdeParameters("
@@ -328,7 +329,7 @@ class odeParameters:
             if np.any([fn in julia_funcs for fn in functions_in_expression]):
                 expression = str(expression)
                 # broadcast the function, allows for input of an array of t
-                for fn in julia_funcs:
+                for fn in functions_in_expression:
                     expression = expression.replace(fn, f"{fn}.")
                 for sym in array_symbols:
                     expression = expression.replace(

@@ -15,7 +15,8 @@ using Distributed
     """
         phase_modulation(t::Float64, β::Float64, ω::Float64)::ComplexF64
 
-    Compute phase modulation at frequency ω with a modudulation strength β at time t
+    Compute phase modulation at frequency ω with a modudulation strength β at time t and returns the relative electric field.
+    Need to square to get the relative powers
     """
     function phase_modulation(t::Float64, β::Float64, ω::Float64)::ComplexF64
         return exp(1im.*β.*sin(ω.*t))

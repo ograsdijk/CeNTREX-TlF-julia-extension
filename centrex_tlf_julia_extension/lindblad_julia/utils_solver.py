@@ -78,7 +78,7 @@ class OBEProblemConfig:
     abstol: float = 1e-7
     reltol: float = 1e-4
     dt: float = 1e-8
-    callback: Optional[CallbackFunction] = ""
+    callback: Optional[CallbackFunction] = None
     dtmin: float = 0
     maxiters: int = 100_000
     saveat: Union[List[float], npt.NDArray[np.floating]] = field(default_factory=list)

@@ -9,7 +9,7 @@ repository = "https://github.com/ograsdijk/CeNTREX-TlF-julia-extension"
 packages = [{include = "centrex_tlf_julia_extension"}]
 
 [tool.poetry.dependencies]
-python = ">=3.9,<3.12"
+python = ">=3.9,<3.13"
 julia = "^0.6.0"
 psutil = "^5.9.4"
 centrex-tlf = "^0.1.0"

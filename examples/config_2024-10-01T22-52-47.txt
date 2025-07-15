@@ -1,0 +1,21 @@
+OdeParameters(ωphase=9801769.079200154, β=4.0, PZ0=1, ω1=6283185.307179586, φ1=0.0, ω2=6283185.307179586, φ2=1.5707963267948966, z0=0.0, y0=0.0, vz=184.0, vx=0.0, vy=0.0, relative_intensities=[1.         0.16734324 0.7225     0.23161695 0.52200625 0.32057709
+ 0.37714952 0.44370531 0.27249053 0.614125   0.1968744  0.85
+ 0.14224176], peak_intensity=44513.88462602656, peak_intensity1=341.9858642083384, peak_intensity2=341.9858642083384, xlocs=[0.00525724 0.00813092 0.01136381 0.01423749 0.01747038 0.02034407
+ 0.02357696 0.02645064 0.02968353 0.03255721 0.03579011 0.03866379
+ 0.04189668], xloc1=0.023576958343930535, xloc2=0.023576958343930535, ylocs=[0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0.], σz=0.000707, σy=0.000354, σ1=0.010786386863657842, σ2=0.010786386863657842, main_coupling=-0.39444688451022775, main_coupling1=0.4898922556951007, main_coupling2=0.49487160811896347)
+
+OBEEnsembleProblemConfig(method='Tsit5()', abstol=1e-06, reltol=0.001, dt=1e-08, callback=CallbackFunction(name='cb', function='\n@everywhere condition(u,t,integrator) = integrator.p[8]+integrator.p[10]*t > 50e-3\n@everywhere affect!(integrator) = terminate!(integrator)\ncb = DiscreteCallback(condition, affect!)\n    '), dtmin=0, maxiters=100000, saveat=[], save_everystep=False, save_idxs=[1, 69, 137, 205, 273, 341, 409, 477, 545, 613, 681, 749, 817, 885, 953, 1021, 1089, 1157, 1225, 1293, 1361, 1429, 1497, 1565, 1633, 1701, 1769, 1837, 1905, 1973, 2041, 2109, 2177, 2245, 2313, 2381, 2449, 2517, 2585, 2653, 2721, 2789, 2857, 2925, 2993, 3061, 3129, 3197, 3265, 3333, 3401, 3469, 3537, 3605, 3673, 3741, 3809, 3877, 3945, 4013, 4081, 4149, 4217, 4285, 4353, 4421, 4489], progress=False, distributed_method='EnsembleDistributed()', trajectories=8712)
+
+tspan=(0, 0.0004)
+
+@everywhere function output_func(sol, i)
+    open("output_2024-10-01T22-52-47.csv", "a") do file
+        println(file, repr(append!([Float64(i)], real(last(sol)))))
+    end
+    real(last(sol)), false
+end
+
+@everywhere condition(u,t,integrator) = integrator.p[8]+integrator.p[10]*t > 50e-3
+@everywhere affect!(integrator) = terminate!(integrator)
+cb = DiscreteCallback(condition, affect!)
+    

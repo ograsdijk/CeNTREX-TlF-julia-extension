@@ -1,0 +1,13 @@
+OdeParameters(Ω0=9801769.079200154, ω0=6283185.307179586, φ0=0.0, Ω1=9801769.079200154, ω1=6283185.307179586, φ1=2.0943951023931953, Ω2=9801769.079200154, ω2=6283185.307179586, φ2=4.1887902047863905, vx=0.0)
+
+OBEEnsembleProblemConfig(method='Tsit5()', abstol=1e-06, reltol=0.001, dt=1e-08, callback=None, dtmin=None, maxiters=100000, saveat=None, save_everystep=False, save_idxs=[1, 69, 137, 205, 273, 341, 409, 477, 545, 613, 681, 749, 817, 885, 953, 1021, 1089, 1157, 1225, 1293, 1361, 1429, 1497, 1565, 1633, 1701, 1769, 1837, 1905, 1973, 2041, 2109, 2177, 2245, 2313, 2381, 2449, 2517, 2585, 2653, 2721, 2789, 2857, 2925, 2993, 3061, 3129, 3197, 3265, 3333, 3401, 3469, 3537, 3605, 3673, 3741, 3809, 3877, 3945, 4013, 4081, 4149, 4217, 4285, 4353, 4421, 4489], progress=False, distributed_method='EnsembleDistributed()', trajectories=None)
+
+tspan=(0, 0.00021)
+
+@everywhere function output_func(sol, i)
+    open("output_2024-09-18T02-21-42.csv", "a") do file
+        println(file, repr(append!([Float64(i)], real(last(sol)))))
+    end
+    real(last(sol)), false
+end
+

@@ -7,7 +7,7 @@ __all__ = ["solve_problem_parameter_scan_progress"]
 def solve_problem_parameter_scan_progress(
     problem: OBEEnsembleProblem,
     config: OBEEnsembleProblemConfig,
-):
+) -> None:
     ensemble_problem_name = problem.name
     problem_name = problem.problem.name
     method = config.method

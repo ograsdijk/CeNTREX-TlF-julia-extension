@@ -8,8 +8,17 @@ __all__ = ["initialize_julia", "generate_ode_fun_julia"]
 
 # jl = juliacall.newmodule("centrex-tlf-julia-extension")
 
+julia_packages = ["TerminalLoggers", "ProgressMeter", "Waveforms", "Trapz", "DifferentialEquations"]
 
-def initialize_julia(nprocs: int, verbose: bool = True):
+def install_packages() -> None:
+    jl.seval("using Pkg")
+    for pkg in julia_packages:
+        if not bool(jl.seval(f'isnothing(Base.find_package("{pkg}")) ? false : true')):
+            print(f"Installing Julia package: {pkg}")
+            jl.Pkg.add(pkg)
+
+
+def initialize_julia(nprocs: int, verbose: bool = True) -> None:
     """
     Function to initialize Julia over nprocs processes.
     Creates nprocs processes and loads the necessary Julia
@@ -18,6 +27,7 @@ def initialize_julia(nprocs: int, verbose: bool = True):
     Args:
         nprocs (int): number of Julia processes to initialize.
     """
+    install_packages()
     jl.seval(
         """
         using Logging: global_logger

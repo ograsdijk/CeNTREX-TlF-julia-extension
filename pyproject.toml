@@ -25,9 +25,22 @@ include = ["centrex_tlf_julia_extension"]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[dependency-groups]
+dev = [
+    "mypy>=1.19.0",
+]
+
+[tool.mypy]
+allow_any_expr = true
+ignore_missing_imports = true
+
 [[tool.mypy.overrides]]
 module = [
-    "julia",
-    "psutil"
+    "psutil",
+    "juliacall",
+    "juliacall.*",
+    "sympy",
+    "sympy.*"
 ]
 ignore_missing_imports = true
+ignore_errors = true

@@ -1,6 +1,7 @@
-from typing import List
+from typing import Any, List, Optional, Sequence, Set, Union
 
 import numpy as np
+import numpy.typing as npt
 import sympy as smp
 from centrex_tlf import hamiltonian
 from centrex_tlf.couplings import TransitionSelector
@@ -82,14 +83,13 @@ class odeParameters:
             if type_conv.get(type(getattr(self, par)).__name__) == "Array"
         )
 
-    def __setattr__(self, name: str, value):
+    def __setattr__(self, name: str, value: Any) -> None:
         if name in [
             "_parameters",
             "_compound_vars",
             "_parameter_types",
             "_array_types",
         ]:
-            super(odeParameters, self).__setattr__(name, value)
             super(odeParameters, self).__setattr__(name, value)
         elif name in self._parameters:
             assert not isinstance(value, str), (
@@ -104,29 +104,29 @@ class odeParameters:
                 "Cannot instantiate new parameter on initialized OdeParameters object"
             )
 
-    def _get_defined_symbols(self):
+    def _get_defined_symbols(self) -> Set[smp.Symbol]:
         symbols_defined = self._parameters + self._compound_vars
         symbols_defined += ["t"]
-        symbols_defined = set([smp.Symbol(s) for s in symbols_defined])
-        return symbols_defined
+        symbols_defined_set = set([smp.Symbol(s) for s in symbols_defined])
+        return symbols_defined_set
 
-    def _get_numerical_symbols(self):
+    def _get_numerical_symbols(self) -> Set[smp.Symbol]:
         symbols_numerical = self._parameters[:]
         symbols_numerical += ["t"]
-        symbols_numerical = set([smp.Symbol(s) for s in symbols_numerical])
-        return symbols_numerical
+        symbols_numerical_set = set([smp.Symbol(s) for s in symbols_numerical])
+        return symbols_numerical_set
 
-    def _get_expression_symbols(self):
-        symbols_expressions = [
+    def _get_expression_symbols(self) -> Set[smp.Symbol]:
+        symbols_expressions_list = [
             smp.parsing.sympy_parser.parse_expr(getattr(self, s))
             for s in self._compound_vars
         ]
         symbols_expressions = set().union(
-            *[s.free_symbols for s in symbols_expressions]
+            *[s.free_symbols for s in symbols_expressions_list]
         )
         return symbols_expressions
 
-    def _check_symbols_defined(self):
+    def _check_symbols_defined(self) -> None:
         symbols_defined = self._get_defined_symbols()
         symbols_expressions = self._get_expression_symbols()
 
@@ -139,11 +139,17 @@ class odeParameters:
         if warn_flag:
             raise AssertionError(warn_string.strip(" ,"))
 
-    def check_symbols_in_parameters(self, symbols_other):
+    def check_symbols_in_parameters(
+        self, symbols_other: Union[str, Sequence[str], Set[str], smp.Symbol]
+    ) -> None:
         if not isinstance(symbols_other, (list, np.ndarray, tuple, set)):
             symbols_other = [symbols_other]
         elif isinstance(symbols_other, set):
             symbols_other = list(symbols_other)
+        
+        if len(symbols_other) == 0:
+            return
+
         if isinstance(symbols_other[0], smp.Symbol):
             symbols_other = [str(sym) for sym in symbols_other]
 
@@ -159,7 +165,7 @@ class odeParameters:
         if warn_flag:
             raise AssertionError(warn_string.strip(" ,"))
 
-    def _order_compound_vars(self):
+    def _order_compound_vars(self) -> None:
         symbols_num = self._get_numerical_symbols()
         unordered = list(self._compound_vars)
         ordered = []
@@ -179,7 +185,7 @@ class odeParameters:
             unordered = [val for val in unordered if val not in ordered]
         self._compound_vars = ordered
 
-    def _get_index_parameter(self, parameter, mode="python"):
+    def _get_index_parameter(self, parameter: str, mode: str = "python") -> int:
         # OdeParameter(ϕ = 'ϕ') results in different unicode representation
         # replace the rhs with the rep. used on the lhs
         parameter = parameter.replace("\u03d5", "\u03c6")
@@ -187,9 +193,11 @@ class odeParameters:
             return self._parameters.index(parameter)
         elif mode == "julia":
             return self._parameters.index(parameter) + 1
+        else:
+            raise ValueError(f"mode {mode} not supported, use 'julia' or 'python'")
 
     @property
-    def p(self):
+    def p(self) -> List[Any]:
         p = [getattr(self, p) for p in self._parameters]
         for idp, pi in enumerate(p):
             if type(pi) == np.ndarray:
@@ -200,13 +208,19 @@ class odeParameters:
                 continue
         return p
 
-    def get_index_parameter(self, parameter, mode="python"):
+    def get_index_parameter(
+        self, parameter: Union[str, Sequence[str]], mode: str = "python"
+    ) -> Union[int, List[int]]:
         if isinstance(parameter, str):
             return self._get_index_parameter(parameter, mode)
         elif isinstance(parameter, (list, np.ndarray)):
             return [self._get_index_parameter(par, mode) for par in parameter]
+        else:
+            raise TypeError(f"parameter type {type(parameter)} not supported")
 
-    def check_transition_symbols(self, transitions):
+    def check_transition_symbols(
+        self, transitions: Sequence[TransitionSelector]
+    ) -> bool:
         # check Rabi rate and detuning symbols
         to_check = ["Ω", "δ"]
         symbols_defined = [str(s) for s in self._get_defined_symbols()]
@@ -218,29 +232,29 @@ class odeParameters:
                     if var not in symbols_defined:
                         not_defined.append(var)
         if len(not_defined) > 0:
-            not_defined = set([str(s) for s in not_defined])
+            not_defined_set = set([str(s) for s in not_defined])
             raise AssertionError(
-                f"Symbol(s) from transitions not defined: {', '.join(not_defined)}"
+                f"Symbol(s) from transitions not defined: {', '.join(not_defined_set)}"
             )
 
         # check polarization switching symbols
-        to_check = []
+        to_check_pol = []
         for transition in transitions:
-            to_check.extend(transition.polarization_symbols)
+            to_check_pol.extend(transition.polarization_symbols)
 
-        symbols_defined = self._get_defined_symbols()
+        symbols_defined_set = self._get_defined_symbols()
 
         warn_flag = False
         warn_string = "Symbol(s) in transition polarization switching not defined: "
-        for ch in to_check:
-            if ch not in symbols_defined:
+        for ch in to_check_pol:
+            if ch not in symbols_defined_set:
                 warn_flag = True
                 warn_string += f"{ch}, "
         if warn_flag:
             raise AssertionError(warn_string.strip(" ,"))
         return True
 
-    def generate_p_julia(self):
+    def generate_p_julia(self) -> None:
         jl_string = (
             "("
             + ",".join(
@@ -258,13 +272,15 @@ class odeParameters:
 
         jl.seval(f"p = {jl_string}")
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         rep = "OdeParameters("
         for par in self._parameters:
             rep += f"{par}={getattr(self, par)}, "
         return rep.strip(", ") + ")"
 
-    def get_parameter_evolution(self, t, parameter):
+    def get_parameter_evolution(
+        self, t: npt.NDArray[np.float64], parameter: str
+    ) -> npt.NDArray[np.float64]:
         """Get the time evolution of parameters in odeParameters.
         Evaluates expressions in python if possible, otherwise calls julia to
         evaluate the expressions
@@ -355,6 +371,8 @@ class odeParameters:
                     return np.ones(len(t)) * res
                 else:
                     return res
+        
+        raise ValueError(f"Parameter {parameter} not found")
 
 
 def generate_ode_parameters(
@@ -389,17 +407,4 @@ def generate_ode_parameters(
     if kwargs is not None:
         for key, val in kwargs.items():
             parameters_dict[key] = val
-    return odeParameters(**parameters_dict)
-    return odeParameters(**parameters_dict)
-    return odeParameters(**parameters_dict)
-    return odeParameters(**parameters_dict)
-    return odeParameters(**parameters_dict)
-    return odeParameters(**parameters_dict)
-    return odeParameters(**parameters_dict)
-    return odeParameters(**parameters_dict)
-    return odeParameters(**parameters_dict)
-    return odeParameters(**parameters_dict)
-    return odeParameters(**parameters_dict)
-    return odeParameters(**parameters_dict)
-    return odeParameters(**parameters_dict)
     return odeParameters(**parameters_dict)

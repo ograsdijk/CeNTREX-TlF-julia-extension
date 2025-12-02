@@ -66,7 +66,7 @@ class OutputFunction:
 class OBEEnsembleProblem:
     problem: OBEProblem
     parameters: List[str]
-    scan_values: List[npt.NDArray[Union[np.int_, np.floating, np.complex128]]]
+    scan_values: List[npt.NDArray[np.number]]
     name: str = "ens_prob"
     output_func: Optional[OutputFunction] = None
     zipped: bool = False
@@ -102,7 +102,7 @@ class OBEResult:
 @dataclass
 class OBEResultParameterScan:
     parameters: List[str]
-    scan_values: List[npt.NDArray[Union[np.int_, np.floating, np.complex128]]]
+    scan_values: Sequence[npt.NDArray[np.generic]]
     results: npt.NDArray[np.complex128]
     zipped: bool
 
@@ -124,7 +124,9 @@ def remove_leading_spaces_to_align(multiline_string: str) -> str:
     return "\n".join(aligned_lines)
 
 
-def get_diagonal_indices_flattened(size, states=None, mode="python"):
+def get_diagonal_indices_flattened(
+    size: int, states: Optional[Sequence[int]] = None, mode: str = "python"
+) -> List[int]:
     if states is None:
         indices = [i + size * i for i in range(size)]
     else:
@@ -133,11 +135,13 @@ def get_diagonal_indices_flattened(size, states=None, mode="python"):
         return [i + 1 for i in indices]
     elif mode == "python":
         return indices
+    else:
+        raise ValueError(f"mode {mode} not supported, use 'julia' or 'python'")
 
 
 def setup_initial_condition_scan(
     values: Union[
-        List[Number], npt.NDArray[Union[np.int_, np.floating, np.complex128]]
+        Sequence[Number], npt.NDArray[np.generic]
     ],
     name: str = "prob_func",
 ) -> ProblemFunction:
@@ -157,8 +161,8 @@ def setup_parameter_scan_zipped(
     odePar: odeParameters,
     parameters: Union[str, List[str]],
     values: Union[
-        npt.NDArray[Union[np.int_, np.floating, np.complex128]],
-        List[npt.NDArray[Union[np.int_, np.floating, np.complex128]]],
+        npt.NDArray[np.generic],
+        Sequence[npt.NDArray[np.generic]],
     ],
     name: str = "prob_func",
 ) -> ProblemFunction:
@@ -170,8 +174,9 @@ def setup_parameter_scan_zipped(
     Args:
         odePar (odeParameters): object containing all the parameters
                                 for the OBE system.
-        parameters (list): list of parameters to scan over
+        parameters (list, str): list of parameters to scan over
         values (list, np.ndarray): list/array of values to scan over.
+        name (str): name of the problem function
     """
     # get the indices of each parameter that is scanned over,
     # as defined in odePars. If a parameter is not scanned over,
@@ -183,6 +188,7 @@ def setup_parameter_scan_zipped(
         else:
             indices = [odePar.get_index_parameter(parameter)]
         for idx in indices:
+            assert isinstance(idx, int)
             pars[idx] = f"params[i,{idN + 1}]"
     params = np.array(list(zip(*values)))
 
@@ -218,7 +224,7 @@ def setup_parameter_scan_zipped(
 def setup_parameter_scan_ND(
     odePar: odeParameters,
     parameters: Union[str, List[str]],
-    values: List[npt.NDArray[Union[np.int_, np.floating, np.complex128]]],
+    values: Sequence[npt.NDArray[np.generic]],
 ) -> ProblemFunction:
     """
     Convenience function for generating an ND parameter scan.
@@ -228,7 +234,7 @@ def setup_parameter_scan_ND(
     Args:
         odePar (odeParameters): object containing all the parameters for
                                 the OBE system.
-        parameters (list, np.ndarray): strs of parameters to scan over.
+        parameters (list, str): strs of parameters to scan over.
         values (list, np.ndarray): list or np.ndarray of values to scan over
                                     for each parameter
     """
@@ -305,7 +311,7 @@ def setup_state_integral_calculation_state_idxs(
     Uses trapezoidal integration to integrate the states.
 
     Args:
-        states (list): list of state indices to integrate
+        output_func (str, optional): name of the output function
         nphotons (bool, optional): flag to calculate the number of photons,
                                     e.g. normalize with Γ
         Γ (float, optional): decay rate in 2π Hz (rad/s), not necessary if already
@@ -479,7 +485,7 @@ def setup_problem_parameter_scan(scan: OBEEnsembleProblem) -> None:
 
 
 def _generate_problem_solve_string(
-    problem: OBEProblem, config: OBEEnsembleProblemConfig
+    problem: OBEProblem, config: OBEProblemConfig
 ) -> str:
     save_idxs = "nothing" if config.save_idxs is None else str(config.save_idxs)
     force_dtmin = "false" if config.dtmin == 0 else "true"
@@ -613,7 +619,7 @@ def get_results_parameter_scan(
 
         return OBEResultParameterScan(
             parameters=scan.parameters,
-            scan_values=np.meshgrid(*scan.scan_values, indexing="ij"),
+            scan_values=list(np.meshgrid(*scan.scan_values, indexing="ij")),
             results=results,
             zipped=False,
         )

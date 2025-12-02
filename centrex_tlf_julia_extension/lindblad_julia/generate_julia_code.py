@@ -22,9 +22,6 @@ def generate_preamble(
     for par in odepars._compound_vars:
         preamble += f"\t\t{par} = {getattr(odepars, par)}\n"
 
-    for transition in transition_selectors:
-        preamble += f"\t\t{transition.Ω}ᶜ = conj({transition.Ω})\n"
-
     # precompute polarization multiplication with polarization
     # for transition in transition_selectors:
     #     for polarization in transition.polarization_symbols:

@@ -1,5 +1,4 @@
-from julia import Main
-
+from .utils_julia import jl
 from .utils_solver import OBEEnsembleProblem, OBEEnsembleProblemConfig
 
 __all__ = ["solve_problem_parameter_scan_progress"]
@@ -9,7 +8,6 @@ def solve_problem_parameter_scan_progress(
     problem: OBEEnsembleProblem,
     config: OBEEnsembleProblemConfig,
 ):
-
     ensemble_problem_name = problem.name
     problem_name = problem.problem.name
     method = config.method
@@ -32,7 +30,7 @@ def solve_problem_parameter_scan_progress(
     _save_idxs = "nothing" if save_idxs is None else str(save_idxs)
 
     if output_func is None:
-        Main.eval(
+        jl.seval(
             """
             @everywhere function output_func_progress(sol, i)
                 put!(channel, 1)
@@ -41,7 +39,7 @@ def solve_problem_parameter_scan_progress(
         """
         )
     else:
-        Main.eval(
+        jl.seval(
             f"""
             @everywhere function output_func_progress(sol, i)
                 put!(channel, 1)
@@ -50,7 +48,7 @@ def solve_problem_parameter_scan_progress(
             end
         """
         )
-    Main.eval(
+    jl.seval(
         f"""
         {ensemble_problem_name} = EnsembleProblem({problem_name},
                                                 prob_func = prob_func,
@@ -59,7 +57,7 @@ def solve_problem_parameter_scan_progress(
     """
     )
 
-    Main.eval(
+    jl.seval(
         """
         if !@isdefined channel
             const channel = RemoteChannel(()->Channel{Int}(1))
@@ -68,7 +66,7 @@ def solve_problem_parameter_scan_progress(
     """
     )
 
-    Main.eval(
+    jl.seval(
         f"""
         progress = Progress({_trajectories}, showspeed = true)
         @sync sol = begin

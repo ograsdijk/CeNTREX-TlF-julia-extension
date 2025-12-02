@@ -1,10 +1,11 @@
 from typing import List
 
-import julia
 import numpy as np
 import sympy as smp
 from centrex_tlf import hamiltonian
 from centrex_tlf.couplings import TransitionSelector
+
+from .utils_julia import jl
 
 __all__ = ["odeParameters", "generate_ode_parameters"]
 
@@ -43,9 +44,9 @@ class odeParameters:
                 "For legacy support supply a list of strings, one for each parameter"
             )
         elif len(args) == 1:
-            assert isinstance(
-                args[0][0], str
-            ), "For legacy support supply a list of strings, one for each parameter"
+            assert isinstance(args[0][0], str), (
+                "For legacy support supply a list of strings, one for each parameter"
+            )
             if "ρ" not in args[0]:
                 args[0].append("ρ")
             kwargs = {par: 0.0 for par in args[0]}
@@ -91,9 +92,9 @@ class odeParameters:
             super(odeParameters, self).__setattr__(name, value)
             super(odeParameters, self).__setattr__(name, value)
         elif name in self._parameters:
-            assert not isinstance(
-                value, str
-            ), "Cannot change parameter from numeric to str"
+            assert not isinstance(value, str), (
+                "Cannot change parameter from numeric to str"
+            )
             super(odeParameters, self).__setattr__(name, value)
         elif name in self._compound_vars:
             assert isinstance(value, str), "Cannot change parameter from str to numeric"
@@ -255,7 +256,7 @@ class odeParameters:
             + ")"
         )
 
-        julia.Main.eval(f"p = {jl_string}")
+        jl.seval(f"p = {jl_string}")
 
     def __repr__(self):
         rep = "OdeParameters("
@@ -339,11 +340,11 @@ class odeParameters:
                 # LOOK AT THIS LATER
                 expression = expression.replace(", 0,", ", 0.0,")
                 # evaluate the specified parameter expression in julia
-                julia.Main.eval(f"_tmp_func(t) = {str(expression)}")
+                jl.seval(f"_tmp_func(t) = {str(expression)}")
                 # can't get broadcasting to work if some variables are of array or list
                 # type, use map
-                julia.Main.tmp_t = t
-                return julia.Main.eval("map(_tmp_func, tmp_t)")
+                jl.tmp_t = t
+                return jl.seval("map(_tmp_func, tmp_t)")
             else:
                 # evaluate the specified parameter expression in python
                 func = smp.lambdify(
@@ -388,4 +389,17 @@ def generate_ode_parameters(
     if kwargs is not None:
         for key, val in kwargs.items():
             parameters_dict[key] = val
+    return odeParameters(**parameters_dict)
+    return odeParameters(**parameters_dict)
+    return odeParameters(**parameters_dict)
+    return odeParameters(**parameters_dict)
+    return odeParameters(**parameters_dict)
+    return odeParameters(**parameters_dict)
+    return odeParameters(**parameters_dict)
+    return odeParameters(**parameters_dict)
+    return odeParameters(**parameters_dict)
+    return odeParameters(**parameters_dict)
+    return odeParameters(**parameters_dict)
+    return odeParameters(**parameters_dict)
+    return odeParameters(**parameters_dict)
     return odeParameters(**parameters_dict)

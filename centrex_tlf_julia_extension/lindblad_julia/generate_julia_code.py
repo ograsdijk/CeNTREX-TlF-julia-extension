@@ -3,7 +3,6 @@ from typing import List, Sequence
 
 import sympy as smp
 from centrex_tlf import couplings
-from centrex_tlf.lindblad import generate_density_matrix_symbolic
 
 from .ode_parameters import odeParameters
 
@@ -19,7 +18,7 @@ def generate_preamble(
     \t@inbounds begin
     """
     for idp, par in enumerate(odepars._parameters):
-        preamble += f"\t\t{par} = p[{idp+1}]\n"
+        preamble += f"\t\t{par} = p[{idp + 1}]\n"
     for par in odepars._compound_vars:
         preamble += f"\t\t{par} = {getattr(odepars, par)}\n"
 
@@ -56,7 +55,8 @@ def system_of_equations_to_lines(
     transition_selectors: Sequence[couplings.TransitionSelector],
 ) -> List[str]:
     n_states = system.shape[0]
-    ρ = generate_density_matrix_symbolic(n_states)
+    rho = smp.IndexedBase("\u03c1")
+    ρ = smp.Matrix(n_states, n_states, lambda i, j: rho[i, j])
 
     # generate polarization*rabi replacements
     # pol_rabi_replacements = []
@@ -69,14 +69,40 @@ def system_of_equations_to_lines(
     #             (f"{polarization}*conj({trans.Ω})", f"{polarization}{trans.Ω}ᶜ")
     #         )
 
-    code_lines = []
+    cse_temps, [system_opt] = smp.cse(system)
+
+    code_lines: list[str] = []
+
+    for val, temp in cse_temps:
+        cline = str(temp)
+        cline = cline.replace("conjugate", "conj")
+        cline = cline.replace("(t)", "")
+        cline = cline.replace("I", "1im")
+        cline += "\n"
+        for i in range(system.shape[0]):
+            for j in range(system.shape[1]):
+                _ = str(ρ[i, j])
+                cline = cline.replace(_ + "*", f"ρ[{i + 1},{j + 1}]*")
+                cline = cline.replace(_ + " ", f"ρ[{i + 1},{j + 1}] ")
+                cline = cline.replace(_ + "\n", f"ρ[{i + 1},{j + 1}]")
+                cline = cline.replace(_ + ")", f"ρ[{i + 1},{j + 1}])")
+        cline = cline.strip()
+        # replace ρ[i,j] with conj(ρ[j,i])
+        for i in range(n_states):
+            for j in range(0, i):
+                cline = cline.replace(
+                    f"ρ[{i + 1},{j + 1}]", f"conj(ρ[{j + 1},{i + 1}])"
+                )
+
+        code_lines.append(f"{val} = {cline}")
+
     # only calculating the upper triangle and diagonal
     for idx in range(n_states):
         for idy in range(idx, n_states):
-            if system[idx, idy] != 0:
-                cline = str(system[idx, idy])
-                cline = f"du[{idx+1},{idy+1}] = " + cline
-                cline = cline.replace("(t)", "")
+            if system_opt[idx, idy] != 0:
+                cline = str(system_opt[idx, idy])
+                cline = cline.replace("conjugate", "conj")
+                cline = f"du[{idx + 1},{idy + 1}] = " + cline
                 cline = cline.replace("(t)", "")
                 cline = cline.replace("I", "1im")
 
@@ -87,16 +113,16 @@ def system_of_equations_to_lines(
                 for i in range(system.shape[0]):
                     for j in range(system.shape[1]):
                         _ = str(ρ[i, j])
-                        cline = cline.replace(_ + "*", f"ρ[{i+1},{j+1}]*")
-                        cline = cline.replace(_ + " ", f"ρ[{i+1},{j+1}] ")
-                        cline = cline.replace(_ + "\n", f"ρ[{i+1},{j+1}]")
-                        cline = cline.replace(_ + ")", f"ρ[{i+1},{j+1}])")
+                        cline = cline.replace(_ + "*", f"ρ[{i + 1},{j + 1}]*")
+                        cline = cline.replace(_ + " ", f"ρ[{i + 1},{j + 1}] ")
+                        cline = cline.replace(_ + "\n", f"ρ[{i + 1},{j + 1}]")
+                        cline = cline.replace(_ + ")", f"ρ[{i + 1},{j + 1}])")
                 cline = cline.strip()
                 # replace ρ[i,j] with conj(ρ[j,i])
                 for i in range(n_states):
                     for j in range(0, i):
                         cline = cline.replace(
-                            f"ρ[{i+1},{j+1}]", f"conj(ρ[{j+1},{i+1}])"
+                            f"ρ[{i + 1},{j + 1}]", f"conj(ρ[{j + 1},{i + 1}])"
                         )
 
                 code_lines.append(cline)

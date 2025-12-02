@@ -1,9 +1,12 @@
 from pathlib import Path
 from typing import List
 
-from julia import Main
+# import juliacall
+from juliacall import Main as jl
 
 __all__ = ["initialize_julia", "generate_ode_fun_julia"]
+
+# jl = juliacall.newmodule("centrex-tlf-julia-extension")
 
 
 def initialize_julia(nprocs: int, verbose: bool = True):
@@ -15,7 +18,7 @@ def initialize_julia(nprocs: int, verbose: bool = True):
     Args:
         nprocs (int): number of Julia processes to initialize.
     """
-    Main.eval(
+    jl.seval(
         """
         using Logging: global_logger
         using TerminalLoggers: TerminalLogger
@@ -26,15 +29,15 @@ def initialize_julia(nprocs: int, verbose: bool = True):
     """
     )
 
-    if Main.eval("nprocs()") < nprocs:
-        Main.eval(f"addprocs({nprocs}-nprocs())")
+    if jl.seval("nprocs()") < nprocs:
+        jl.seval(f"addprocs({nprocs}-nprocs())")
 
-    if Main.eval("nprocs()") > nprocs:
-        procs = Main.eval("procs()")
+    if jl.seval("nprocs()") > nprocs:
+        procs = jl.seval("procs()")
         procs = procs[nprocs:]
-        Main.eval(f"rmprocs({procs})")
+        jl.seval(f"rmprocs({procs})")
 
-    Main.eval(
+    jl.seval(
         """
         @everywhere begin
             using LinearAlgebra
@@ -45,7 +48,7 @@ def initialize_julia(nprocs: int, verbose: bool = True):
     )
     # loading common julia functions from julia_common.jl
     path = Path(__file__).parent / "julia_common.jl"
-    Main.eval(f'include(raw"{path}")')
+    jl.seval(f'include(raw"{path}")')
 
     if verbose:
         print(f"Initialized Julia with {nprocs} processes")
@@ -69,5 +72,5 @@ def generate_ode_fun_julia(preamble: str, code_lines: List[str]) -> str:
     for cline in code_lines:
         ode_fun += "\t\t" + cline + "\n"
     ode_fun += "\t end \n \t nothing \n end"
-    Main.eval(f"@everywhere {ode_fun}")
+    jl.seval(f"@everywhere {ode_fun}")
     return ode_fun

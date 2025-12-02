@@ -5,9 +5,9 @@ from typing import List, Optional, Sequence, Tuple, Union
 import numpy as np
 import numpy.typing as npt
 import sympy as smp
-from julia import Main
 
 from .ode_parameters import odeParameters
+from .utils_julia import jl
 
 numeric = Union[int, float, complex]
 
@@ -141,13 +141,14 @@ def setup_initial_condition_scan(
     ],
     name: str = "prob_func",
 ) -> ProblemFunction:
-    Main.params = values
-    Main.eval("@everywhere params = $params")
+    jl.params = values
+    jl.params = jl.seval("collect(params)")
+    jl.seval("@everywhere params = $params")
     function_str = f"""
     @everywhere function {name}(prob,i,repeat)
         remake(prob,u0=params[i])
     end"""
-    Main.eval(function_str)
+    jl.seval(function_str)
     function_str = remove_leading_spaces_to_align(function_str)
     return ProblemFunction(name=name, function=function_str)
 
@@ -182,7 +183,7 @@ def setup_parameter_scan_zipped(
         else:
             indices = [odePar.get_index_parameter(parameter)]
         for idx in indices:
-            pars[idx] = f"params[i,{idN+1}]"
+            pars[idx] = f"params[i,{idN + 1}]"
     params = np.array(list(zip(*values)))
 
     _pars = (
@@ -200,14 +201,15 @@ def setup_parameter_scan_zipped(
 
     # generate prob_func which remakes the ODE problem for
     # each different parameter set
-    Main.params = params
-    Main.eval("@everywhere params = $params")
+    jl.params = params
+    jl.seval("params = collect(params)")
+    jl.seval("@everywhere params = $params")
     function_str = f"""
     @everywhere function prob_func(prob, i, repeat)
         remake(prob, p = {_pars})
     end
     """
-    Main.eval(function_str)
+    jl.seval(function_str)
 
     function_str = remove_leading_spaces_to_align(function_str)
     return ProblemFunction(name=name, function=function_str)
@@ -258,7 +260,7 @@ def setup_ratio_calculation_state_idxs(
     end"""
 
     function_str = remove_leading_spaces_to_align(function_str)
-    Main.eval(function_str)
+    jl.seval(function_str)
     return OutputFunction(name=output_func, function=function_str)
 
 
@@ -292,7 +294,7 @@ def setup_ratio_calculation(
         end
     end"""
     function_str = remove_leading_spaces_to_align(function_str)
-    Main.eval(function_str)
+    jl.seval(function_str)
     return OutputFunction(name=output_func, function=function_str)
 
 
@@ -314,29 +316,29 @@ def setup_state_integral_calculation_state_idxs(
     else:
         output_func = output_func
 
-    if nphotons & Main.eval("@isdefined Γ"):
+    if nphotons & jl.seval("@isdefined Γ"):
         function_str = f"""
         @everywhere function {output_func}(sol,i)
             return Γ.*trapz(sol.t, [real(sum(sol.u[j])) for j in 1:size(sol)[2]]), false
         end"""
-        Main.eval(function_str)
+        jl.seval(function_str)
     else:
         if nphotons:
-            assert (
-                Γ is not None
-            ), "Γ not defined as a global in Julia and not supplied to function"
-            Main.eval(f"@everywhere Γ = {Γ}")
+            assert Γ is not None, (
+                "Γ not defined as a global in Julia and not supplied to function"
+            )
+            jl.seval(f"@everywhere Γ = {Γ}")
             function_str = f"""
             @everywhere function {output_func}(sol,i)
                 return {Γ}.*trapz(sol.t, [real(sum(sol.u[j])) for j in 1:size(sol)[2]]), false
             end"""
-            Main.eval(function_str)
+            jl.seval(function_str)
         else:
             function_str = f"""
             @everywhere function {output_func}(sol,i)
                 return trapz(sol.t, [real(sum(sol.u[j])) for j in 1:size(sol)[2]]), false
             end"""
-            Main.eval(function_str)
+            jl.seval(function_str)
 
     function_str = remove_leading_spaces_to_align(function_str)
     return OutputFunction(name=output_func, function=function_str)
@@ -362,29 +364,29 @@ def setup_state_integral_calculation(
         output_func = "output_func"
     else:
         output_func = output_func
-    if nphotons & Main.eval("@isdefined Γ"):
+    if nphotons & jl.seval("@isdefined Γ"):
         function_str = f"""
         @everywhere function {output_func}(sol,i)
             return Γ.*trapz(sol.t, [real(sum(diag(sol.u[j])[{states}])) for j in 1:size(sol)[3]]), false
         end"""
-        Main.eval(function_str)
+        jl.seval(function_str)
     else:
         if nphotons:
-            assert (
-                Γ is not None
-            ), "Γ not defined as a global in Julia and not supplied to function"
-            Main.eval(f"@everywhere Γ = {Γ}")
+            assert Γ is not None, (
+                "Γ not defined as a global in Julia and not supplied to function"
+            )
+            jl.seval(f"@everywhere Γ = {Γ}")
             function_str = f"""
             @everywhere function {output_func}(sol,i)
                 return {Γ}.*trapz(sol.t, [real(sum(diag(sol.u[j])[{states}])) for j in 1:size(sol)[3]]), false
             end"""
-            Main.eval(function_str)
+            jl.seval(function_str)
         else:
             function_str = f"""
             @everywhere function {output_func}(sol,i)
                 return trapz(sol.t, [real(sum(diag(sol.u[j])[{states}])) for j in 1:size(sol)[3]]), false
             end"""
-            Main.eval(function_str)
+            jl.seval(function_str)
 
     function_str = remove_leading_spaces_to_align(function_str)
     return OutputFunction(name=output_func, function=function_str)
@@ -419,7 +421,7 @@ def setup_discrete_callback_terminate(
         {callback_name} = DiscreteCallback(condition, affect!)
     """
     function_str = remove_leading_spaces_to_align(function_str)
-    Main.eval(function_str)
+    jl.seval(function_str)
     return CallbackFunction(name=callback_name, function=function_str)
 
 
@@ -430,12 +432,13 @@ def setup_problem(
     problem_name: str = "prob",
 ) -> None:
     odepars.generate_p_julia()
-    Main.ρ = ρ
-    Main.tspan = tspan
-    assert Main.eval(
-        "@isdefined Lindblad_rhs!"
-    ), "Lindblad function is not defined in Julia"
-    Main.eval(
+    jl.ρ = ρ
+    jl.seval("ρ = collect(ρ)")
+    jl.tspan = tspan
+    assert jl.seval("@isdefined Lindblad_rhs!"), (
+        "Lindblad function is not defined in Julia"
+    )
+    jl.seval(
         f"""
         {problem_name} = ODEProblem(Lindblad_rhs!,ρ,tspan,p)
     """
@@ -458,7 +461,7 @@ def setup_problem_parameter_scan(scan: OBEEnsembleProblem) -> None:
     else:
         setup_parameter_scan_ND(odepars, parameters, values)
     if output_func is not None:
-        Main.eval(
+        jl.seval(
             f"""
             ens_{problem_name} = EnsembleProblem({problem_name},
                                                     prob_func = prob_func,
@@ -467,7 +470,7 @@ def setup_problem_parameter_scan(scan: OBEEnsembleProblem) -> None:
         """
         )
     else:
-        Main.eval(
+        jl.seval(
             f"""
             ens_{problem_name} = EnsembleProblem({problem_name},
                                                     prob_func = prob_func)
@@ -507,7 +510,7 @@ def solve_problem(
     config: OBEProblemConfig = OBEProblemConfig(),
 ) -> None:
     solve_string = _generate_problem_solve_string(problem, config)
-    Main.eval(f"{solve_string}; tmp=0;")
+    jl.seval(f"{solve_string}; tmp=0;")
 
 
 def _generate_problem_parameter_scan_solve_string(
@@ -543,7 +546,7 @@ def solve_problem_parameter_scan(
     config: OBEEnsembleProblemConfig = OBEEnsembleProblemConfig(),
 ) -> None:
     solve_string = _generate_problem_parameter_scan_solve_string(problem, config)
-    Main.eval(f"{solve_string}; tmp=0;")
+    jl.seval(f"{solve_string}; tmp=0;")
 
 
 def get_results_single() -> OBEResult:
@@ -552,8 +555,9 @@ def get_results_single() -> OBEResult:
     Returns:
         tuple: OBEResult dataclass with the solution of the OBE for a single trajectory
     """
-    results = np.real(np.einsum("jji->ji", np.array(Main.eval("sol[:]")).T))
-    t = Main.eval("sol.t")
+    y = np.array([np.array(mat) for mat in jl.seval("sol[:]")])
+    results = np.real(np.einsum("jji->ji", y.T))
+    t = np.array(jl.seval("sol.t"))
     return OBEResult(t, results)
 
 
@@ -581,10 +585,10 @@ def get_results_parameter_scan(
     if scan.zipped:
         if scan.output_func is None:
             results = np.array(
-                [Main.eval(f"sol.u[{idx+1}][end]") for idx in range(_trajectories)]
+                [jl.seval(f"sol.u[{idx + 1}][end]") for idx in range(_trajectories)]
             )
         else:
-            results = np.array(Main.eval("sol.u"))
+            results = np.array(jl.seval("sol.u"))
         return OBEResultParameterScan(
             parameters=scan.parameters,
             scan_values=scan.scan_values,
@@ -594,11 +598,11 @@ def get_results_parameter_scan(
     else:
         if scan.output_func is None:
             results = np.array(
-                [Main.eval(f"sol.u[{idx+1}][end]") for idx in range(_trajectories)]
+                [jl.seval(f"sol.u[{idx + 1}][end]") for idx in range(_trajectories)]
             )
 
         else:
-            results = np.array(Main.eval("sol.u"))
+            results = np.array(jl.seval("sol.u"))
 
         if len(results.shape) == 1:
             results = results.reshape([len(v) for v in scan.scan_values][::-1]).T

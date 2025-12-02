@@ -8,11 +8,10 @@ import sympy as smp
 from centrex_tlf import couplings, hamiltonian, states
 from centrex_tlf.couplings import CouplingFields
 from centrex_tlf.lindblad import OBESystem, utils_decay
-from julia import Main
 
 from .generate_julia_code import generate_preamble, system_of_equations_to_lines
 from .ode_parameters import odeParameters
-from .utils_julia import generate_ode_fun_julia, initialize_julia
+from .utils_julia import generate_ode_fun_julia, initialize_julia, jl
 
 __all__ = ["OBESystemJulia", "generate_OBE_system_julia", "setup_OBE_system_julia"]
 
@@ -115,6 +114,6 @@ def setup_OBE_system_julia(
             " parameters in Julia"
         )
     generate_ode_fun_julia(obe_system_julia.preamble, obe_system_julia.code_lines)
-    Main.eval(f"@everywhere Γ = {Γ}")
+    jl.seval(f"@everywhere Γ = {Γ}")
     ode_parameters.generate_p_julia()
     return obe_system_julia

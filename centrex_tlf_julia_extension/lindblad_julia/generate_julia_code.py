@@ -3,6 +3,7 @@ from typing import List, Sequence
 
 import sympy as smp
 from centrex_tlf import couplings
+from sympy.printing.julia import julia_code
 
 from .ode_parameters import odeParameters
 
@@ -20,7 +21,13 @@ def generate_preamble(
     for idp, par in enumerate(odepars._parameters):
         preamble += f"\t\t{par} = p[{idp + 1}]\n"
     for par in odepars._compound_vars:
-        preamble += f"\t\t{par} = {getattr(odepars, par)}\n"
+        sympy_expr = smp.parsing.sympy_parser.parse_expr(getattr(odepars, par))
+        julia_expr = julia_code(sympy_expr, strict=False)
+        clean = "\n".join(
+            line for line in julia_expr.splitlines() if not line.strip().startswith("#")
+        )
+
+        preamble += f"\t\t{par} = {clean}\n"
 
     # precompute polarization multiplication with polarization
     # for transition in transition_selectors:

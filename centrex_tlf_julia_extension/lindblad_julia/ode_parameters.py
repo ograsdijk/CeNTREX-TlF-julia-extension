@@ -5,6 +5,7 @@ import numpy.typing as npt
 import sympy as smp
 from centrex_tlf import hamiltonian
 from centrex_tlf.couplings import TransitionSelector
+from sympy.printing.julia import julia_code
 
 from .utils_julia import jl
 
@@ -21,7 +22,7 @@ julia_funcs = [
     "variable_on_off",
     "rabi_from_intensity",
     "multipass_2d_rabi",
-    "resonant_switching",
+    "resonant_polarization_modulation",
 ]
 
 type_conv = {
@@ -146,7 +147,7 @@ class odeParameters:
             symbols_other = [symbols_other]
         elif isinstance(symbols_other, set):
             symbols_other = list(symbols_other)
-        
+
         if len(symbols_other) == 0:
             return
 
@@ -247,7 +248,8 @@ class odeParameters:
         warn_flag = False
         warn_string = "Symbol(s) in transition polarization switching not defined: "
         for ch in to_check_pol:
-            if ch not in symbols_defined_set:
+            # need to convert to real sympy symbol for comparison
+            if smp.Symbol(ch.name) not in symbols_defined_set:
                 warn_flag = True
                 warn_string += f"{ch}, "
         if warn_flag:
@@ -345,6 +347,13 @@ class odeParameters:
             # check if any of the functions are special julia defined functions
             if np.any([fn in julia_funcs for fn in functions_in_expression]):
                 expression = str(expression)
+                expression_smp = smp.parsing.sympy_parser.parse_expr(expression)
+                expression_jl = julia_code(expression_smp, strict=False)
+                expression = "\n".join(
+                    line
+                    for line in expression_jl.splitlines()
+                    if not line.strip().startswith("#")
+                )
                 # broadcast the function, allows for input of an array of t
                 for fn in functions_in_expression:
                     expression = expression.replace(fn, f"{fn}.")
@@ -356,11 +365,11 @@ class odeParameters:
                 # LOOK AT THIS LATER
                 expression = expression.replace(", 0,", ", 0.0,")
                 # evaluate the specified parameter expression in julia
-                jl.seval(f"_tmp_func(t) = {str(expression)}")
+                jl.seval(f"_tmp_func(t) = {expression}")
                 # can't get broadcasting to work if some variables are of array or list
                 # type, use map
                 jl.tmp_t = t
-                return jl.seval("map(_tmp_func, tmp_t)")
+                return np.array(jl.seval("map(_tmp_func, tmp_t)"))
             else:
                 # evaluate the specified parameter expression in python
                 func = smp.lambdify(
@@ -371,7 +380,7 @@ class odeParameters:
                     return np.ones(len(t)) * res
                 else:
                     return res
-        
+
         raise ValueError(f"Parameter {parameter} not found")
 
 

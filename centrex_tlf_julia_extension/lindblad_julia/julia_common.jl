@@ -33,7 +33,9 @@ using Distributed
     Need to square to get the relative powers
     """
     function phase_modulation(t::Float64, β::Float64, ω::Float64)::ComplexF64
-        return exp(1im.*β.*sin(ω.*t))
+        φ = β * sin(ω * t)
+        sφ, cφ = sincos(φ)
+        return cφ + im*sφ
     end
 
     """
@@ -46,12 +48,17 @@ using Distributed
     end
 
     """
-        resonant_switching(t::Float64, ω::Float64, phase::Float64)
+        resonant_polarization_modulation(t::Float64, ω::Float64, phase::Float64)
 
-    generate the polarization coming from a resonant EOM
+    generate a single polarization component coming from a resonant polarization
+    modulating EOM
     """
-    function resonant_switching(t::Float64, ω::Float64, phase::Float64)::Float64
-        -cos(pi*(1 .+ cos(ω .* t .+ phase))/2)/2 + 1/2
+    function resonant_polarization_modulation(t::Float64, γ::Float64, ω::Float64)::ComplexF64
+        θ = 0.5 * γ * sin(ω * t)        # θ = (γ/2) * sin(Ω t)
+        sθ, cθ = sincos(θ)             # compute sin and cos together
+        a = cθ + sθ                    # cos(θ) + sin(θ)
+        a2 = 0.5 * a                   # (cos(θ) + sin(θ)) / 2
+        return complex(a2, a2)         # (1 + i)/2 * (cos(θ) + sin(θ))
     end
     """
         sawtooth_wave(t::Float64, ω::Float64, phase::Float64)::Float64

@@ -1,6 +1,6 @@
 [project]
 name = "centrex-tlf-julia-extension"
-version = "0.3.0"
+version = "0.3.1"
 description = "Extension for centrex-tlf to run OBE simulations in Julia"
 authors = [{ name = "ograsdijk", email = "o.grasdijk@gmail.com" }]
 requires-python = ">=3.11"
@@ -8,7 +8,7 @@ readme = "README.md"
 license = "MIT"
 dependencies = [
     "psutil>=5.9.4,<6",
-    "centrex-tlf==0.1.7.1",
+    "centrex-tlf>=0.1.8",
     "juliacall>=0.9.30",
 ]
 

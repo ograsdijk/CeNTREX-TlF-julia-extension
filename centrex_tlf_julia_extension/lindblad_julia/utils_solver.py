@@ -85,6 +85,7 @@ class OBEProblemConfig:
     save_everystep: bool = True
     save_idxs: Optional[List[int]] = None
     progress: bool = False
+    dense: bool = False
 
 
 @dataclass
@@ -303,7 +304,6 @@ def setup_ratio_calculation(
     jl.seval(function_str)
     return OutputFunction(name=output_func, function=function_str)
 
-
 def setup_state_integral_calculation_state_idxs(
     output_func: Optional[str] = None, nphotons: bool = False, Γ: Optional[float] = None
 ) -> OutputFunction:
@@ -397,6 +397,60 @@ def setup_state_integral_calculation(
     function_str = remove_leading_spaces_to_align(function_str)
     return OutputFunction(name=output_func, function=function_str)
 
+def setup_state_integral_callback(
+    states: Sequence[int],
+    problem_wrap_name: str = "wrap_prob_func",
+    output_func: str = "output_func",
+) -> tuple[CallbackFunction, ProblemFunction, OutputFunction]:
+    # Embed the tuple literal directly into the Julia code (no globals, no consts).
+    states_tuple = tuple(states)
+
+    callback_str = f"""
+    @everywhere function nphotons_integrator(u, t, integrator)
+        s = 0.0
+        @inbounds for j in {states_tuple}
+            s += real(u[j, j])
+        end
+        return s
+    end
+    """
+
+    prob_func_str = f"""
+    @everywhere function {problem_wrap_name}(prob_func_old)
+        function prob_func_new(prob, i, repeat)
+            prob2 = prob_func_old(prob, i, repeat)
+
+            integ = IntegrandValuesSum(0.0)  # per-trajectory accumulator
+
+            cb = IntegratingSumCallback(nphotons_integrator, integ, 0.0)
+
+            oldcb = prob2.callback
+            newcb = oldcb === nothing ? cb : CallbackSet(oldcb, cb)
+
+            # Append integ to p so it can be retrieved in output_func without globals.
+            pnew = (prob2.p..., integ)
+
+            return remake(prob2; p = pnew, callback = newcb)
+        end
+        return prob_func_new
+    end
+    """
+
+    function_str = f"""
+    @everywhere function {output_func}(sol, i)
+        return sol.prob.p[end].integrand, false
+    end
+    """
+
+    jl.seval(callback_str)
+    jl.seval(prob_func_str)
+    jl.seval(function_str)
+
+    return (
+        CallbackFunction(name="cb", function=callback_str),
+        ProblemFunction(name=problem_wrap_name, function=prob_func_str),
+        OutputFunction(name=output_func, function=function_str),
+    )
 
 def setup_discrete_callback_terminate(
     odepars: odeParameters, stop_expression: str, callback_name: Optional[str] = None
@@ -451,7 +505,7 @@ def setup_problem(
     )
 
 
-def setup_problem_parameter_scan(scan: OBEEnsembleProblem) -> None:
+def setup_problem_parameter_scan(scan: OBEEnsembleProblem) -> ProblemFunction:
     odepars = scan.problem.odepars
     tspan = scan.problem.tspan
     ρ = scan.problem.ρ
@@ -462,9 +516,9 @@ def setup_problem_parameter_scan(scan: OBEEnsembleProblem) -> None:
 
     setup_problem(odepars, tspan, ρ, problem_name)
     if zipped:
-        setup_parameter_scan_zipped(odepars, parameters, values)
+        prob_func = setup_parameter_scan_zipped(odepars, parameters, values)
     else:
-        setup_parameter_scan_ND(odepars, parameters, values)
+        prob_func = setup_parameter_scan_ND(odepars, parameters, values)
 
     if scan.output_func is not None:
         jl.seval(
@@ -482,6 +536,7 @@ def setup_problem_parameter_scan(scan: OBEEnsembleProblem) -> None:
                                                     prob_func = prob_func)
         """
         )
+    return prob_func
 
 
 def _generate_problem_solve_string(
@@ -504,7 +559,8 @@ def _generate_problem_solve_string(
         dtmin={config.dtmin},
         force_dtmin={force_dtmin},
         save_everystep={str(config.save_everystep).lower()},
-        maxiters={config.maxiters}
+        maxiters={config.maxiters},
+        dense={str(config.dense).lower()}
     )
     """
 
@@ -541,7 +597,8 @@ def _generate_problem_parameter_scan_solve_string(
         callback = {callback},
         save_everystep = {str(config.save_everystep).lower()},
         saveat = {config.saveat},
-        save_idxs = {save_idxs}
+        save_idxs = {save_idxs},
+        dense = {str(config.dense).lower()},
     )
     """
     return remove_leading_spaces_to_align(solve_string)

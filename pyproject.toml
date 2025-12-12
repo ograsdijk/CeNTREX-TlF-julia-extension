@@ -1,6 +1,6 @@
 [project]
 name = "centrex-tlf-julia-extension"
-version = "0.3.1"
+version = "0.3.2"
 description = "Extension for centrex-tlf to run OBE simulations in Julia"
 authors = [{ name = "ograsdijk", email = "o.grasdijk@gmail.com" }]
 requires-python = ">=3.11"

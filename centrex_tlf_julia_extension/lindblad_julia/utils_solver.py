@@ -459,19 +459,19 @@ def setup_problem_parameter_scan(scan: OBEEnsembleProblem) -> None:
     zipped = scan.zipped
     parameters = scan.parameters
     values = scan.scan_values
-    output_func = scan.output_func.name if scan.output_func is not None else "nothing"
 
     setup_problem(odepars, tspan, ρ, problem_name)
     if zipped:
         setup_parameter_scan_zipped(odepars, parameters, values)
     else:
         setup_parameter_scan_ND(odepars, parameters, values)
-    if output_func is not None:
+
+    if scan.output_func is not None:
         jl.seval(
             f"""
             ens_{problem_name} = EnsembleProblem({problem_name},
                                                     prob_func = prob_func,
-                                                    output_func = {output_func}
+                                                    output_func = {scan.output_func.name}
                                                 )
         """
         )

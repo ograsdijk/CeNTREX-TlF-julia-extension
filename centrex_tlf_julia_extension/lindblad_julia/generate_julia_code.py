@@ -73,7 +73,7 @@ def system_of_equations_to_lines(
     #             (f"{polarization}*conj({trans.Ω})", f"{polarization}{trans.Ω}ᶜ")
     #         )
 
-    cse_temps, [system_opt] = smp.cse(system)
+    cse_temps, [system_opt] = smp.cse(system, optimizations="basic")
 
     code_lines: list[str] = []
 

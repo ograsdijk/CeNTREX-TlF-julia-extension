@@ -141,9 +141,7 @@ def get_diagonal_indices_flattened(
 
 
 def setup_initial_condition_scan(
-    values: Union[
-        Sequence[Number], npt.NDArray[np.generic]
-    ],
+    values: Union[Sequence[Number], npt.NDArray[np.generic]],
     name: str = "prob_func",
 ) -> ProblemFunction:
     jl.params = values
@@ -304,6 +302,7 @@ def setup_ratio_calculation(
     jl.seval(function_str)
     return OutputFunction(name=output_func, function=function_str)
 
+
 def setup_state_integral_calculation_state_idxs(
     output_func: Optional[str] = None, nphotons: bool = False, Γ: Optional[float] = None
 ) -> OutputFunction:
@@ -397,6 +396,7 @@ def setup_state_integral_calculation(
     function_str = remove_leading_spaces_to_align(function_str)
     return OutputFunction(name=output_func, function=function_str)
 
+
 def setup_state_integral_callback(
     states: Sequence[int],
     problem_wrap_name: str = "wrap_prob_func",
@@ -451,6 +451,7 @@ def setup_state_integral_callback(
         ProblemFunction(name=problem_wrap_name, function=prob_func_str),
         OutputFunction(name=output_func, function=function_str),
     )
+
 
 def setup_discrete_callback_terminate(
     odepars: odeParameters, stop_expression: str, callback_name: Optional[str] = None
@@ -625,7 +626,7 @@ def get_results_single() -> OBEResult:
 
 
 def get_results_parameter_scan(
-    scan: OBEEnsembleProblem, trajectories: Optional[int] = None
+    scan: OBEEnsembleProblem, trajectories: None | int = None
 ) -> OBEResultParameterScan:
     """
     Retrieve the results of a parameter scan
@@ -638,17 +639,17 @@ def get_results_parameter_scan(
         OBEResultParameterScan: Dataclass containing the results of the parameter scan.
     """
     if trajectories is None:
-        if scan.zipped is not None:
-            _trajectories = len(scan.scan_values[0])
+        if scan.zipped or len(scan.scan_values) == 1:
+            trajectories = len(scan.scan_values[0])
         else:
-            _trajectories = len(np.product([len(v) for v in scan.scan_values]))
+            trajectories = len(np.prod([len(v) for v in scan.scan_values]))
     else:
-        _trajectories = trajectories
+        trajectories = trajectories
 
     if scan.zipped:
         if scan.output_func is None:
             results = np.array(
-                [jl.seval(f"sol.u[{idx + 1}][end]") for idx in range(_trajectories)]
+                [jl.seval(f"sol.u[{idx + 1}][end]") for idx in range(trajectories)]
             )
         else:
             results = np.array(jl.seval("sol.u"))
@@ -661,17 +662,17 @@ def get_results_parameter_scan(
     else:
         if scan.output_func is None:
             results = np.array(
-                [jl.seval(f"sol.u[{idx + 1}][end]") for idx in range(_trajectories)]
+                [jl.seval(f"sol.u[{idx + 1}][end]") for idx in range(trajectories)]
             )
-
         else:
             results = np.array(jl.seval("sol.u"))
 
-        if len(results.shape) == 1:
-            results = results.reshape([len(v) for v in scan.scan_values][::-1]).T
+        if results.ndim == 1:
+            if len(scan.scan_values) != 1:
+                results = results.reshape([len(v) for v in scan.scan_values][::-1]).T
         else:
             results = results.reshape(
-                [len(v) for v in scan.scan_values][::-1] + [results.shape[-1]]
+                [len(v) for v in scan.scan_values][::-1] + list(results.shape[1:])
             ).T
 
         return OBEResultParameterScan(

@@ -29,14 +29,6 @@ def generate_preamble(
 
         preamble += f"\t\t{par} = {clean}\n"
 
-    # precompute polarization multiplication with polarization
-    # for transition in transition_selectors:
-    #     for polarization in transition.polarization_symbols:
-    #         preamble += (
-    #             f"\t\t{polarization}{transition.Ω} = {polarization} * {transition.Ω}\n"
-    #         )
-    #         preamble += f"\t\t{polarization}{transition.Ω}ᶜ = conj({polarization}{transition.Ω})\n"
-
     # remove duplicate lines (if multiple transitions have the same Rabi rate symbol or
     # detuning
     preamble = "\n".join(list(OrderedDict.fromkeys(preamble.split("\n"))))
@@ -61,17 +53,6 @@ def system_of_equations_to_lines(
     n_states = system.shape[0]
     rho = smp.IndexedBase("\u03c1")
     ρ = smp.Matrix(n_states, n_states, lambda i, j: rho[i, j])
-
-    # generate polarization*rabi replacements
-    # pol_rabi_replacements = []
-    # for trans in transition_selectors:
-    #     for polarization in trans.polarization_symbols:
-    #         pol_rabi_replacements.append(
-    #             (f"{polarization}*{trans.Ω}", f"{polarization}{trans.Ω}")
-    #         )
-    #         pol_rabi_replacements.append(
-    #             (f"{polarization}*conj({trans.Ω})", f"{polarization}{trans.Ω}ᶜ")
-    #         )
 
     cse_temps, [system_opt] = smp.cse(system, optimizations="basic")
 

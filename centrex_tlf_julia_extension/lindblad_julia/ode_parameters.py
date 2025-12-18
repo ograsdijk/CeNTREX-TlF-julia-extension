@@ -5,25 +5,13 @@ import numpy.typing as npt
 import sympy as smp
 from centrex_tlf import hamiltonian
 from centrex_tlf.couplings import TransitionSelector
+from sympy.parsing import sympy_parser
 from sympy.printing.julia import julia_code
 
+from .parse_julia_functions import julia_functions
 from .utils_julia import jl
 
 __all__ = ["odeParameters", "generate_ode_parameters"]
-
-
-julia_funcs = [
-    "gaussian_2d",
-    "gaussian_2d_rotated",
-    "phase_modulation",
-    "square_wave",
-    "multipass_2d_intensity",
-    "sawtooth_wave",
-    "variable_on_off",
-    "rabi_from_intensity",
-    "multipass_2d_rabi",
-    "resonant_polarization_modulation",
-]
 
 type_conv = {
     "int": "Int64",
@@ -35,6 +23,14 @@ type_conv = {
     "list": "Array",
     "ndarray": "Array",
 }
+
+
+def parse_odepars_to_sympy(odepars: "odeParameters"):
+    expressions = []
+    for par in odepars._compound_vars:
+        sympy_expr = sympy_parser.parse_expr(getattr(odepars, par))
+        expressions.append((par, sympy_expr))
+    return expressions
 
 
 class odeParameters:
@@ -345,7 +341,7 @@ class odeParameters:
                 str(fn).split("(")[0] for fn in expression.atoms(smp.Function)
             ]
             # check if any of the functions are special julia defined functions
-            if np.any([fn in julia_funcs for fn in functions_in_expression]):
+            if np.any([fn in julia_functions for fn in functions_in_expression]):
                 expression = str(expression)
                 expression_smp = smp.parsing.sympy_parser.parse_expr(expression)
                 expression_jl = julia_code(expression_smp, strict=False)
@@ -412,6 +408,11 @@ def generate_ode_parameters(
                 (str(ps[1]), f"P{idt} <= 0"),
             ]
             parameters.extend(pars)
+        else:
+            raise ValueError(
+                "TransitionSelector with more than two polarization "
+                "switching symbols not supported"
+            )
     parameters_dict = dict(parameters)
     if kwargs is not None:
         for key, val in kwargs.items():

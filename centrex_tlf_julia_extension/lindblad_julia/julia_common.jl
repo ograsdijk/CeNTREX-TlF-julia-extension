@@ -73,8 +73,36 @@ using Distributed
 
     """
     function variable_on_off(t::Float64, ton::Float64, toff::Float64, phase::Float64)::Float64
-        ω = 2π*1.0/(ton+toff)
-        sawtooth_wave(t, ω, phase) <= ton/(ton+toff) ? 1. : 0.
+        T = ton + toff
+        duty = ton / T
+
+        # fractional phase in [0, 1)
+        frac = mod(2π * t / T + phase, 2π) * (1 / (2π))
+
+        return ifelse(frac < duty, 1.0, 0.0)
+    end
+
+    """
+        variable_on_off_duty(t::Float64, duty::Float64, T::Float64, ω::Float64, phase::Float64)::Float64
+
+    Periodic on/off gate.
+
+    - `duty`  : duty cycle in [0, 1] (fraction of the period that is ON)
+    - `T`     : period
+    - `ω`     : angular frequency (typically 2π / T)
+    - `phase` : phase offset [rad]
+
+    Returns 1.0 during the ON portion of the cycle and 0.0 otherwise.
+    """
+    @inline function variable_on_off_duty(
+        t::Float64,
+        duty::Float64,
+        T::Float64,
+        ω::Float64,
+        phase::Float64,
+    )::Float64
+        frac = mod(ω * t + phase, 2π) * (1 / (2π))
+        return ifelse(frac < duty, 1.0, 0.0)
     end
 
     """
@@ -124,5 +152,56 @@ using Distributed
         intensity = gaussian_2d(x, y, intensity, xloc, yloc, σx, σy)
         rabi = rabi_from_intensity(intensity, main_coupling, D)
         return rabi
+    end
+
+    @inline _alpha_beta(::Type{T}) where {T<:Complex} = (T(zero(real(T)), one(real(T))), zero(real(T)))
+
+
+    function liouvillian_commutator_her2k!(C::StridedMatrix{T},
+                                        A::StridedMatrix{T},
+                                        B::StridedMatrix{T};
+                                        uplo::Char='U') where {T<:Complex}
+        α, β = _alpha_beta(T)
+        # HER2K with trans='N': C := α*A*B' + conj(α)*B*A'
+        # If A,B are Hermitian, this equals i*(BA - AB).
+        BLAS.her2k!(uplo, 'N', α, B, A, β, C)   # note order (B,A) to match i*(BA - AB)
+        # mirror to full Hermitian C
+        mirror_hermitian!(C, uplo)
+        return nothing
+    end
+
+    """
+        liouvillian_commutator!(C, A, B)
+
+    Compute the quantum commutator -i[A,B] = -i(AB - BA) and store the result in C.
+
+    Efficiently computes the matrix commutator in-place using optimized matrix operations.
+    This is commonly used in quantum mechanics to represent Heisenberg equations of motion.
+
+    # Arguments
+    - `C`: Output matrix where the commutator result will be stored
+    - `A`: First input matrix
+    - `B`: Second input matrix
+
+    # Returns
+    - `nothing`: This function modifies `C` in-place
+
+    # Notes
+    - Requires all matrices to have compatible dimensions
+
+    # Example
+    ```julia
+    A = rand(ComplexF64, 3, 3)
+    B = rand(ComplexF64, 3, 3)
+    C = zeros(ComplexF64, 3, 3)
+    liouvillian_commutator!(C, A, B)  # C now contains -i[A,B]
+    ```
+    """
+    function liouvillian_commutator!(C, A, B)
+        @inbounds begin
+            mul!(C, B, A)                # C = BA
+            mul!(C, A, B, -1im, 1im)     # C = 1im * BA + (-1im) * AB = i(BA - AB) = -i[A,B]
+        end
+        return nothing
     end
 end

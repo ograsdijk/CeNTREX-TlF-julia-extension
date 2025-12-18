@@ -86,6 +86,7 @@ class OBEProblemConfig:
     save_idxs: Optional[List[int]] = None
     progress: bool = False
     dense: bool = False
+    save_start: bool = True
 
 
 @dataclass
@@ -561,7 +562,8 @@ def _generate_problem_solve_string(
         force_dtmin={force_dtmin},
         save_everystep={str(config.save_everystep).lower()},
         maxiters={config.maxiters},
-        dense={str(config.dense).lower()}
+        dense={str(config.dense).lower()},
+        save_start={str(config.save_start).lower()}
     )
     """
 
@@ -600,6 +602,7 @@ def _generate_problem_parameter_scan_solve_string(
         saveat = {config.saveat},
         save_idxs = {save_idxs},
         dense = {str(config.dense).lower()},
+        save_start = {str(config.save_start).lower()}
     )
     """
     return remove_leading_spaces_to_align(solve_string)
@@ -626,7 +629,7 @@ def get_results_single() -> OBEResult:
 
 
 def get_results_parameter_scan(
-    scan: OBEEnsembleProblem, trajectories: None | int = None
+    scan: OBEEnsembleProblem, config: OBEEnsembleProblemConfig
 ) -> OBEResultParameterScan:
     """
     Retrieve the results of a parameter scan
@@ -638,16 +641,24 @@ def get_results_parameter_scan(
     Returns:
         OBEResultParameterScan: Dataclass containing the results of the parameter scan.
     """
+    trajectories = config.trajectories
     if trajectories is None:
         if scan.zipped or len(scan.scan_values) == 1:
             trajectories = len(scan.scan_values[0])
         else:
-            trajectories = len(np.prod([len(v) for v in scan.scan_values]))
+            trajectories = np.prod([len(v) for v in scan.scan_values])
     else:
         trajectories = trajectories
 
+    # check if returning 2D density matrices
+    return_2D = config.save_idxs is None
+
+    # check if saving multiple timesteps
+    saveat_defined = isinstance(config.saveat, (float, int, complex)) or len(config.saveat) > 0
     if scan.zipped:
         if scan.output_func is None:
+            if config.save_everystep or saveat_defined or config.save_everystep:
+                raise NotImplementedError("Extracting time-dependent results from parameter scans is not yet implemented.")
             results = np.array(
                 [jl.seval(f"sol.u[{idx + 1}][end]") for idx in range(trajectories)]
             )
@@ -660,10 +671,23 @@ def get_results_parameter_scan(
             zipped=True,
         )
     else:
+        size = jl.seval("size(sol)")
+
         if scan.output_func is None:
-            results = np.array(
-                [jl.seval(f"sol.u[{idx + 1}][end]") for idx in range(trajectories)]
-            )
+            if config.save_everystep or saveat_defined or config.save_everystep:
+                raise NotImplementedError("Extracting time-dependent results from parameter scans is not yet implemented.")
+
+            if return_2D:
+                results = np.array(
+                    [jl.seval(f"sol.u[{idx + 1}][end]") for idx in range(trajectories)]
+                )
+            else:
+                if config.save_start:
+                    results = np.array(
+                        [jl.seval(f"sol.u[{idx + 1}][end]") for idx in range(trajectories)]
+                    )
+                else:
+                    results = np.array(jl.seval("sol.u"))
         else:
             results = np.array(jl.seval("sol.u"))
 
@@ -672,7 +696,7 @@ def get_results_parameter_scan(
                 results = results.reshape([len(v) for v in scan.scan_values][::-1]).T
         else:
             results = results.reshape(
-                [len(v) for v in scan.scan_values][::-1] + list(results.shape[1:])
+                list([len(v) for v in scan.scan_values] + list(results.shape[1:]))[::-1]
             ).T
 
         return OBEResultParameterScan(

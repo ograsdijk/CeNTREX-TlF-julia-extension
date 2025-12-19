@@ -48,13 +48,22 @@ def hamiltonian_functor(hamiltonian_signature: smp.Function) -> str:
         end
     """
     args = hamiltonian_signature.args
-    # Extract parameter names (excluding du and t which are function arguments)
+
+    def get_name(arg: smp.Basic) -> str:
+        if isinstance(arg, smp.Symbol):
+            return arg.name
+        raise TypeError("Expected sympy.Symbol in function arguments.")
+
+    # Build struct fields for parameters (excluding 'du' and 't')
     args_struct = "\n".join(
-        [f"    {arg.name}::T" for arg in args if arg.name not in ["du", "t"]]
+        [f"    {get_name(arg)}::T" for arg in args if get_name(arg) not in ["du", "t"]]
     )
     # Build function call with struct fields (h.param) for parameters
     args_func = ", ".join(
-        [f"h.{arg.name}" if arg.name not in ["du", "t"] else arg.name for arg in args]
+        [
+            f"h.{get_name(arg)}" if get_name(arg) not in ["du", "t"] else get_name(arg)
+            for arg in args
+        ]
     )
     ham_functor_code = f"""
 struct HamFunctor{{T}}

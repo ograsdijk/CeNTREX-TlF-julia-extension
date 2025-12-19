@@ -1,14 +1,15 @@
 from pathlib import Path
 from typing import List
 
-# import juliacall
-from juliacall import Main as jl
+import juliacall
+
+jl = juliacall.Main  # type: ignore[attr-defined]
 
 __all__ = ["initialize_julia", "generate_ode_fun_julia"]
 
 # jl = juliacall.newmodule("centrex-tlf-julia-extension")
 
-julia_packages = [
+julia_dependency_packages = [
     "TerminalLoggers",
     "ProgressMeter",
     "Waveforms",
@@ -19,7 +20,7 @@ julia_packages = [
 
 def install_packages() -> None:
     jl.seval("using Pkg")
-    for pkg in julia_packages:
+    for pkg in julia_dependency_packages:
         if not bool(jl.seval(f'isnothing(Base.find_package("{pkg}")) ? false : true')):
             print(f"Installing Julia package: {pkg}")
             jl.Pkg.add(pkg)
@@ -61,6 +62,7 @@ def initialize_julia(nprocs: int, verbose: bool = True) -> None:
             using LinearAlgebra.BLAS
             using Trapz
             using DifferentialEquations
+            using Waveforms
         end
     """
     )

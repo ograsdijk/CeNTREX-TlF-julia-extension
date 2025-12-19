@@ -8,6 +8,7 @@ import sympy as smp
 from centrex_tlf import couplings, hamiltonian, states
 from centrex_tlf.couplings import CouplingFields
 from centrex_tlf.lindblad import OBESystem, utils_decay
+from sympy import MutableDenseMatrix
 
 from .generate_julia_code import generate_preamble, system_of_equations_to_lines
 from .ode_parameters import odeParameters
@@ -50,10 +51,10 @@ class OBESystemJulia:
     H_int: npt.NDArray[np.complex128]
     V_ref_int: npt.NDArray[np.complex128]
     couplings: List[Any]
-    H_symbolic: smp.matrices.dense.MutableDenseMatrix
-    dissipator: smp.matrices.dense.MutableDenseMatrix
+    H_symbolic: MutableDenseMatrix
+    dissipator: MutableDenseMatrix
     C_array: npt.NDArray[np.floating]
-    system: smp.matrices.dense.MutableDenseMatrix
+    system: MutableDenseMatrix | None
     code: CodeExpanded | CodeMatrix
     full_output: bool = False
     QN_original: Optional[Sequence[states.State]] = None
@@ -96,11 +97,18 @@ def generate_OBE_system_julia(
     ode_parameters: odeParameters,
     method: str,
 ) -> OBESystemJulia:
+    if obe_system.dissipator is None:
+        raise ValueError("obe_system.dissipator is None, cannot generate code.")
+
     if method == "expanded":
         preamble = generate_preamble(ode_parameters, transition_selectors)
         code_lines = system_of_equations_to_lines(
             obe_system.system, transition_selectors
         )
+        if obe_system.system is None:
+            raise ValueError(
+                "obe_system.system is None, cannot generate expanded code."
+            )
         return OBESystemJulia(
             QN=obe_system.QN,
             ground=obe_system.ground,

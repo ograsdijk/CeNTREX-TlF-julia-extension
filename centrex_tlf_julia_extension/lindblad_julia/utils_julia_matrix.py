@@ -1,4 +1,7 @@
 import sympy as smp
+from sympy.parsing import sympy_parser
+
+from .ode_parameters import odeParameters
 
 liouville_commutator_functions = [
     "liouvillian_commutator!",
@@ -134,7 +137,7 @@ struct LindbladParameters{{HamFunc, DissFunc, T<:AbstractArray}}
 {args_buffer}
 end
 
-function lindblad!(du, u, p::LindbladParameters, t)
+function Lindblad_rhs!(du, u, p::LindbladParameters, t)
     p.hamiltonian!(p.buffer0, t)
     {commutator_name}({args_commutator})
     p.dissipator!(du, u)
@@ -216,3 +219,31 @@ def generate_code_matrix_method(
         + lindblad_function_and_parameters(commutator_name)
         + "\n"
     )
+
+
+def parse_compound_vars_odepars(odepars: odeParameters) -> dict[str, smp.Expr]:
+    expressions = []
+    for par in odepars._compound_vars:
+        sympy_expr = sympy_parser.parse_expr(getattr(odepars, par))
+        expressions.append((par, sympy_expr))
+    return dict(expressions[::-1])
+
+
+def substitute_odepars_hamiltonian(
+    hamiltonian: smp.Matrix,
+    odepars: odeParameters,
+) -> smp.Matrix:
+    hamiltonian = hamiltonian.copy()
+
+    parsed_compound_vars = parse_compound_vars_odepars(odepars)
+    free_symbols: list[smp.Symbol] = list(hamiltonian.free_symbols)
+    free_symbols_str = [s.name for s in free_symbols]
+
+    for par, expr in parsed_compound_vars.items():
+        if par in free_symbols_str:
+            sym = free_symbols[free_symbols_str.index(par)]
+            hamiltonian = hamiltonian.subs(sym, expr)
+        else:
+            sym = smp.Symbol(par)
+            hamiltonian = hamiltonian.subs(sym, expr)
+    return hamiltonian

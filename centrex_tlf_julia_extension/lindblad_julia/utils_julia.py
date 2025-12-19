@@ -8,7 +8,14 @@ __all__ = ["initialize_julia", "generate_ode_fun_julia"]
 
 # jl = juliacall.newmodule("centrex-tlf-julia-extension")
 
-julia_packages = ["TerminalLoggers", "ProgressMeter", "Waveforms", "Trapz", "DifferentialEquations"]
+julia_packages = [
+    "TerminalLoggers",
+    "ProgressMeter",
+    "Waveforms",
+    "Trapz",
+    "DifferentialEquations",
+]
+
 
 def install_packages() -> None:
     jl.seval("using Pkg")
@@ -51,6 +58,7 @@ def initialize_julia(nprocs: int, verbose: bool = True) -> None:
         """
         @everywhere begin
             using LinearAlgebra
+            using LinearAlgebra.BLAS
             using Trapz
             using DifferentialEquations
         end

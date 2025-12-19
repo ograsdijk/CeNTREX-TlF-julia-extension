@@ -25,14 +25,6 @@ type_conv = {
 }
 
 
-def parse_odepars_to_sympy(odepars: "odeParameters"):
-    expressions = []
-    for par in odepars._compound_vars:
-        sympy_expr = sympy_parser.parse_expr(getattr(odepars, par))
-        expressions.append((par, sympy_expr))
-    return expressions
-
-
 class odeParameters:
     def __init__(self, *args, **kwargs):
         # if elif statement is for legacy support, where a list of parameters was
@@ -79,6 +71,7 @@ class odeParameters:
             for par in self._parameters
             if type_conv.get(type(getattr(self, par)).__name__) == "Array"
         )
+        self._method = "expanded"
 
     def __setattr__(self, name: str, value: Any) -> None:
         if name in [
@@ -95,6 +88,8 @@ class odeParameters:
             super(odeParameters, self).__setattr__(name, value)
         elif name in self._compound_vars:
             assert isinstance(value, str), "Cannot change parameter from str to numeric"
+            super(odeParameters, self).__setattr__(name, value)
+        elif name == "_method":
             super(odeParameters, self).__setattr__(name, value)
         else:
             raise AssertionError(
@@ -115,8 +110,7 @@ class odeParameters:
 
     def _get_expression_symbols(self) -> Set[smp.Symbol]:
         symbols_expressions_list = [
-            smp.parsing.sympy_parser.parse_expr(getattr(self, s))
-            for s in self._compound_vars
+            sympy_parser.parse_expr(getattr(self, s)) for s in self._compound_vars
         ]
         symbols_expressions = set().union(
             *[s.free_symbols for s in symbols_expressions_list]
@@ -170,7 +164,7 @@ class odeParameters:
         while len(unordered) != 0:
             for compound in unordered:
                 if compound not in ordered:
-                    symbols = smp.parsing.sympy_parser.parse_expr(
+                    symbols = sympy_parser.parse_expr(
                         getattr(self, compound)
                     ).free_symbols
                     m = [
@@ -268,7 +262,12 @@ class odeParameters:
             + ")"
         )
 
-        jl.seval(f"p = {jl_string}")
+        if self._method == "expanded":
+            jl.seval(f"p = {jl_string}")
+        elif self._method == "matrix":
+            jl.seval(f"p_values = {jl_string}")
+            jl.seval("HamFun = HamFunctor(p_values...)")
+            jl.seval("p = LindbladParameters(HamFun, DissFun, buf)")
 
     def __repr__(self) -> str:
         rep = "OdeParameters("
@@ -302,7 +301,7 @@ class odeParameters:
         elif parameter in self._compound_vars:
             expression = getattr(self, str(parameter))
             # parse expression string to sympy equation
-            expression = smp.parsing.sympy_parser.parse_expr(expression)
+            expression = sympy_parser.parse_expr(expression)
             while True:
                 symbols_in_expression = [
                     sym for sym in expression.free_symbols if sym is not smp.Symbol("t")
@@ -316,7 +315,7 @@ class odeParameters:
                 # expression
                 if np.any(compound_bool):
                     for idx in np.where(compound_bool)[0]:
-                        compound_var = smp.parsing.sympy_parser.parse_expr(
+                        compound_var = sympy_parser.parse_expr(
                             getattr(self, symbols_in_expression[idx])
                         )
                         expression = expression.subs(
@@ -343,7 +342,7 @@ class odeParameters:
             # check if any of the functions are special julia defined functions
             if np.any([fn in julia_functions for fn in functions_in_expression]):
                 expression = str(expression)
-                expression_smp = smp.parsing.sympy_parser.parse_expr(expression)
+                expression_smp = sympy_parser.parse_expr(expression)
                 expression_jl = julia_code(expression_smp, strict=False)
                 expression = "\n".join(
                     line
@@ -378,6 +377,24 @@ class odeParameters:
                     return res
 
         raise ValueError(f"Parameter {parameter} not found")
+
+    def reorder(self, order: Sequence[str]) -> None:
+        """Reorder the parameters in odeParameters according to order"""
+        new_order = []
+        if not isinstance(order, (list, tuple, np.ndarray, set)):
+            raise TypeError("order must be a sequence of parameter names")
+        order_set = set(order)
+        missing = set(self._parameters) - order_set
+        if missing:
+            raise ValueError(
+                f"Parameter(s) not present in order: {', '.join(sorted(missing))}"
+            )
+
+        for par in order:
+            if par not in self._parameters:
+                raise ValueError(f"Parameter {par} not found in odeParameters")
+            new_order.append(par)
+        self._parameters = new_order
 
 
 def generate_ode_parameters(

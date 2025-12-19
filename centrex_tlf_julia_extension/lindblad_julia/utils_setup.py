@@ -16,6 +16,7 @@ from .utils_julia_matrix import (
     dissipator_functor,
     hamiltonian_functor,
     lindblad_function_and_parameters,
+    substitute_odepars_hamiltonian,
 )
 from .utils_julia_matrix_assemble import (
     generate_dissipator_code,
@@ -37,6 +38,8 @@ class CodeMatrix:
     dissipator: str
     lindblad: str
     support: str
+    hamiltonian_signature: smp.Function
+    dissipator_signature: smp.Function
 
 
 @dataclass
@@ -115,8 +118,11 @@ def generate_OBE_system_julia(
             couplings_original=obe_system.couplings_original,
         )
     elif method == "matrix":
+        hamiltonian_subbed = substitute_odepars_hamiltonian(
+            obe_system.H_symbolic, ode_parameters
+        )
         hamiltonian_code, hamiltonian_signature = generate_hamiltonian_code(
-            obe_system.H_symbolic
+            hamiltonian_subbed
         )
         dissipator_code, dissipator_signature = generate_dissipator_code(
             obe_system.dissipator
@@ -125,6 +131,20 @@ def generate_OBE_system_julia(
 
         ham_functor_code = hamiltonian_functor(hamiltonian_signature)
         diss_functor_code = dissipator_functor()
+
+        # reorder ode parameters to match Hamiltonian signature
+        new_order = [
+            str(v) for v in hamiltonian_signature.args if str(v) not in ["du", "t"]
+        ]
+        ode_parameters.reorder(new_order)
+        ode_parameters._method = "matrix"
+
+        other_code = "DissFun = DissFunctor()\n"
+
+        nstates = obe_system.H_symbolic.shape[0]
+        other_code += f"nstates = {nstates}\n"
+        other_code += "buf = zeros(ComplexF64, nstates, nstates)\n"
+
         return OBESystemJulia(
             QN=obe_system.QN,
             ground=obe_system.ground,
@@ -140,7 +160,9 @@ def generate_OBE_system_julia(
                 hamiltonian_code,
                 dissipator_code,
                 lindblad,
-                ham_functor_code + diss_functor_code,
+                ham_functor_code + diss_functor_code + other_code,
+                hamiltonian_signature,
+                dissipator_signature,
             ),
             QN_original=obe_system.QN_original,
             decay_channels=obe_system.decay_channels,

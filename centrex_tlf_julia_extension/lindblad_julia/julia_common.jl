@@ -154,8 +154,35 @@ using Distributed
         return rabi
     end
 
-    @inline _alpha_beta(::Type{T}) where {T<:Complex} = (T(zero(real(T)), one(real(T))), zero(real(T)))
+    function mirror_hermitian!(C::StridedMatrix{T}, uplo::Char = 'U') where {T<:Complex}
+        n = size(C, 1)
+        @inbounds if uplo == 'U'
+            # copy upper → lower (conjugate)
+            for k in 1:n-1
+                i = 1
+                j = k + 1
+                @simd for _ = 1:n-k
+                    C[j, i] = conj(C[i, j])
+                    i += 1
+                    j += 1
+                end
+            end
+        else
+            # copy lower → upper (conjugate)
+            for k in 1:n-1
+                i = 1
+                j = k + 1
+                @simd for _ = 1:n-k
+                    C[i, j] = conj(C[j, i])
+                    i += 1
+                    j += 1
+                end
+            end
+        end
+        return C
+    end
 
+    @inline _alpha_beta(::Type{T}) where {T<:Complex} = (T(zero(real(T)), one(real(T))), zero(real(T)))
 
     function liouvillian_commutator_her2k!(C::StridedMatrix{T},
                                         A::StridedMatrix{T},

@@ -70,6 +70,7 @@ class OBEEnsembleProblem:
     name: str = "ens_prob"
     output_func: None | OutputFunction = None
     zipped: bool = False
+    method: str = "expanded"
 
 
 @dataclass
@@ -160,7 +161,7 @@ def setup_initial_condition_scan(
 
 
 def setup_parameter_scan_zipped(
-    odePar: odeParameters,
+    ode_parameters: odeParameters,
     parameters: str | Sequence[str],
     values: Sequence[npt.NDArray[np.generic]] | npt.NDArray[np.generic],
     name: str = "prob_func",
@@ -180,12 +181,12 @@ def setup_parameter_scan_zipped(
     # get the indices of each parameter that is scanned over,
     # as defined in odePars. If a parameter is not scanned over,
     # use the variable definition
-    pars = list(odePar.p)
+    pars = list(ode_parameters.p)
     for idN, parameter in enumerate(parameters):
         if isinstance(parameter, (list, tuple)):
-            indices = [odePar.get_index_parameter(par) for par in parameter]
+            indices = [ode_parameters.get_index_parameter(par) for par in parameter]
         else:
-            indices = [odePar.get_index_parameter(parameter)]
+            indices = [ode_parameters.get_index_parameter(parameter)]
         for idx in indices:
             assert isinstance(idx, int)
             pars[idx] = f"params[i,{idN + 1}]"
@@ -204,16 +205,30 @@ def setup_parameter_scan_zipped(
         + ")"
     )
 
-    # generate prob_func which remakes the ODE problem for
-    # each different parameter set
     jl.params = params
     jl.seval("params = collect(params)")
     jl.seval("@everywhere params = $params")
-    function_str = f"""
-    @everywhere function prob_func(prob, i, repeat)
-        remake(prob, p = {_pars})
-    end
-    """
+
+    # generate prob_func which remakes the ODE problem for
+    # each different parameter set
+    if ode_parameters._method == "expanded":
+        function_str = f"""
+        @everywhere function prob_func(prob, i, repeat)
+            remake(prob, p = {_pars})
+        end
+        """
+    elif ode_parameters._method == "matrix":
+        function_str = f"""
+        @everywhere function prob_func(prob, i, repeat)
+            p_values = {_pars}
+            HamFun = HamFunctor(p_values...)
+            p_new = LindbladParameters(HamFun, DissFun, buf)
+            remake(prob, p = p_new)
+        end
+        """
+    else:
+        raise ValueError(f"method {ode_parameters._method} not supported")
+
     jl.seval(function_str)
 
     function_str = remove_leading_spaces_to_align(function_str)
@@ -495,8 +510,10 @@ def setup_problem(
     problem_name: str = "prob",
 ) -> None:
     odepars.generate_p_julia()
+
     jl.ρ = ρ
     jl.seval("ρ = collect(ρ)")
+
     jl.tspan = tspan
     assert jl.seval("@isdefined Lindblad_rhs!"), (
         "Lindblad function is not defined in Julia"

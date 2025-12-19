@@ -1,15 +1,15 @@
 from dataclasses import dataclass, field
 from numbers import Number
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import Sequence
 
 import numpy as np
 import numpy.typing as npt
-import sympy as smp
+from sympy.parsing import sympy_parser
 
 from .ode_parameters import odeParameters
 from .utils_julia import jl
 
-numeric = Union[int, float, complex]
+numeric = int | float | complex
 
 __all__ = [
     "get_diagonal_indices_flattened",
@@ -40,7 +40,7 @@ __all__ = [
 class OBEProblem:
     odepars: odeParameters
     ρ: npt.NDArray[np.complex128]
-    tspan: Union[List[float], Tuple[float]]
+    tspan: list[float] | tuple[float, ...]
     name: str = "prob"
 
 
@@ -65,10 +65,10 @@ class OutputFunction:
 @dataclass
 class OBEEnsembleProblem:
     problem: OBEProblem
-    parameters: List[str]
-    scan_values: List[npt.NDArray[np.number]]
+    parameters: list[str]
+    scan_values: list[npt.NDArray[np.number]]
     name: str = "ens_prob"
-    output_func: Optional[OutputFunction] = None
+    output_func: None | OutputFunction = None
     zipped: bool = False
 
 
@@ -78,20 +78,23 @@ class OBEProblemConfig:
     abstol: float = 1e-7
     reltol: float = 1e-4
     dt: float = 1e-8
-    callback: Optional[CallbackFunction] = None
+    callback: None | CallbackFunction = None
     dtmin: float = 0
     maxiters: int = 100_000
-    saveat: Union[List[float], npt.NDArray[np.floating]] = field(default_factory=list)
+    saveat: list[float] | npt.NDArray[np.floating] | float | int = field(
+        default_factory=list
+    )
     save_everystep: bool = True
-    save_idxs: Optional[List[int]] = None
+    save_idxs: None | list[int] = None
     progress: bool = False
     dense: bool = False
+    save_start: bool = True
 
 
 @dataclass
 class OBEEnsembleProblemConfig(OBEProblemConfig):
     distributed_method: str = "EnsembleDistributed()"
-    trajectories: Optional[int] = None
+    trajectories: None | int = None
 
 
 @dataclass
@@ -102,7 +105,7 @@ class OBEResult:
 
 @dataclass
 class OBEResultParameterScan:
-    parameters: List[str]
+    parameters: list[str]
     scan_values: Sequence[npt.NDArray[np.generic]]
     results: npt.NDArray[np.complex128]
     zipped: bool
@@ -126,8 +129,8 @@ def remove_leading_spaces_to_align(multiline_string: str) -> str:
 
 
 def get_diagonal_indices_flattened(
-    size: int, states: Optional[Sequence[int]] = None, mode: str = "python"
-) -> List[int]:
+    size: int, states: None | Sequence[int] = None, mode: str = "python"
+) -> list[int]:
     if states is None:
         indices = [i + size * i for i in range(size)]
     else:
@@ -141,7 +144,7 @@ def get_diagonal_indices_flattened(
 
 
 def setup_initial_condition_scan(
-    values: Union[Sequence[Number], npt.NDArray[np.generic]],
+    values: Sequence[Number] | npt.NDArray[np.generic],
     name: str = "prob_func",
 ) -> ProblemFunction:
     jl.params = values
@@ -158,11 +161,8 @@ def setup_initial_condition_scan(
 
 def setup_parameter_scan_zipped(
     odePar: odeParameters,
-    parameters: Union[str, List[str]],
-    values: Union[
-        npt.NDArray[np.generic],
-        Sequence[npt.NDArray[np.generic]],
-    ],
+    parameters: str | Sequence[str],
+    values: Sequence[npt.NDArray[np.generic]] | npt.NDArray[np.generic],
     name: str = "prob_func",
 ) -> ProblemFunction:
     """
@@ -173,8 +173,8 @@ def setup_parameter_scan_zipped(
     Args:
         odePar (odeParameters): object containing all the parameters
                                 for the OBE system.
-        parameters (list, str): list of parameters to scan over
-        values (list, np.ndarray): list/array of values to scan over.
+        parameters (Sequence[str] | str): list of parameters to scan over
+        values (Sequence[npt.NDArray[np.generic]] | npt.NDArray[np.generic]): list/array of values to scan over.
         name (str): name of the problem function
     """
     # get the indices of each parameter that is scanned over,
@@ -222,8 +222,10 @@ def setup_parameter_scan_zipped(
 
 def setup_parameter_scan_ND(
     odePar: odeParameters,
-    parameters: Union[str, List[str]],
-    values: Sequence[npt.NDArray[np.generic]],
+    parameters: str | Sequence[str],
+    values: Sequence[npt.NDArray[np.generic]]
+    | npt.NDArray[np.generic]
+    | Sequence[Number],
 ) -> ProblemFunction:
     """
     Convenience function for generating an ND parameter scan.
@@ -233,8 +235,8 @@ def setup_parameter_scan_ND(
     Args:
         odePar (odeParameters): object containing all the parameters for
                                 the OBE system.
-        parameters (list, str): strs of parameters to scan over.
-        values (list, np.ndarray): list or np.ndarray of values to scan over
+        parameters (str | List[str]): strs of parameters to scan over.
+        values (Sequence[npt.NDArray[np.generic]] | npt.NDArray[np.generic]): list or np.ndarray of values to scan over
                                     for each parameter
     """
     # create all possible combinations between parameter values with meshgrid
@@ -244,8 +246,8 @@ def setup_parameter_scan_ND(
 
 
 def setup_ratio_calculation_state_idxs(
-    states: Optional[Sequence[int]] = None,
-    output_func: Optional[str] = None,
+    states: None | Sequence[int] = None,
+    output_func: None | str = None,
 ) -> OutputFunction:
     if output_func is None:
         output_func = "output_func"
@@ -270,8 +272,8 @@ def setup_ratio_calculation_state_idxs(
 
 
 def setup_ratio_calculation(
-    states: Union[Sequence[int], Sequence[Sequence[int]]],
-    output_func: Optional[str] = None,
+    states: Sequence[int] | Sequence[Sequence[int]],
+    output_func: None | str = None,
 ) -> OutputFunction:
     if output_func is None:
         output_func = "output_func"
@@ -304,14 +306,14 @@ def setup_ratio_calculation(
 
 
 def setup_state_integral_calculation_state_idxs(
-    output_func: Optional[str] = None, nphotons: bool = False, Γ: Optional[float] = None
+    output_func: None | str = None, nphotons: bool = False, Γ: None | float = None
 ) -> OutputFunction:
     """Setup an integration output_function for an EnsembleProblem.
     Uses trapezoidal integration to integrate the states.
 
     Args:
-        output_func (str, optional): name of the output function
-        nphotons (bool, optional): flag to calculate the number of photons,
+        output_func (None | str, optional): name of the output function
+        nphotons (bool): flag to calculate the number of photons,
                                     e.g. normalize with Γ
         Γ (float, optional): decay rate in 2π Hz (rad/s), not necessary if already
                                 loaded into Julia globals
@@ -351,9 +353,9 @@ def setup_state_integral_calculation_state_idxs(
 
 def setup_state_integral_calculation(
     states: Sequence[int],
-    output_func: Optional[str] = None,
+    output_func: None | str = None,
     nphotons: bool = False,
-    Γ: Optional[float] = None,
+    Γ: None | float = None,
 ) -> OutputFunction:
     """Setup an integration output_function for an EnsembleProblem.
     Uses trapezoidal integration to integrate the states.
@@ -454,10 +456,10 @@ def setup_state_integral_callback(
 
 
 def setup_discrete_callback_terminate(
-    odepars: odeParameters, stop_expression: str, callback_name: Optional[str] = None
+    odepars: odeParameters, stop_expression: str, callback_name: None | str = None
 ) -> CallbackFunction:
     # parse expression string to sympy equation
-    expression = smp.parsing.sympy_parser.parse_expr(stop_expression)
+    expression = sympy_parser.parse_expr(stop_expression)
     # extract symbols in expression and convert to a list of strings
     symbols_in_expression = list(expression.free_symbols)
     symbols_in_expression = [str(sym) for sym in symbols_in_expression]
@@ -488,7 +490,7 @@ def setup_discrete_callback_terminate(
 
 def setup_problem(
     odepars: odeParameters,
-    tspan: Union[List[float], Tuple[float]],
+    tspan: list[float] | tuple[float, ...],
     ρ: npt.NDArray[np.complex128],
     problem_name: str = "prob",
 ) -> None:
@@ -561,7 +563,8 @@ def _generate_problem_solve_string(
         force_dtmin={force_dtmin},
         save_everystep={str(config.save_everystep).lower()},
         maxiters={config.maxiters},
-        dense={str(config.dense).lower()}
+        dense={str(config.dense).lower()},
+        save_start={str(config.save_start).lower()}
     )
     """
 
@@ -600,6 +603,7 @@ def _generate_problem_parameter_scan_solve_string(
         saveat = {config.saveat},
         save_idxs = {save_idxs},
         dense = {str(config.dense).lower()},
+        save_start = {str(config.save_start).lower()}
     )
     """
     return remove_leading_spaces_to_align(solve_string)
@@ -626,7 +630,7 @@ def get_results_single() -> OBEResult:
 
 
 def get_results_parameter_scan(
-    scan: OBEEnsembleProblem, trajectories: None | int = None
+    scan: OBEEnsembleProblem, config: OBEEnsembleProblemConfig
 ) -> OBEResultParameterScan:
     """
     Retrieve the results of a parameter scan
@@ -638,16 +642,26 @@ def get_results_parameter_scan(
     Returns:
         OBEResultParameterScan: Dataclass containing the results of the parameter scan.
     """
+    trajectories = config.trajectories
     if trajectories is None:
         if scan.zipped or len(scan.scan_values) == 1:
             trajectories = len(scan.scan_values[0])
         else:
-            trajectories = len(np.prod([len(v) for v in scan.scan_values]))
+            trajectories = int(np.prod([len(v) for v in scan.scan_values]))
     else:
         trajectories = trajectories
 
+    # check if returning 2D density matrices
+    return_2D = config.save_idxs is None
+
+    # check if saving multiple timesteps
+    saveat_defined = isinstance(config.saveat, (float, int)) or len(config.saveat) > 0
     if scan.zipped:
         if scan.output_func is None:
+            if config.save_everystep or saveat_defined or config.save_everystep:
+                raise NotImplementedError(
+                    "Extracting time-dependent results from parameter scans is not yet implemented."
+                )
             results = np.array(
                 [jl.seval(f"sol.u[{idx + 1}][end]") for idx in range(trajectories)]
             )
@@ -660,10 +674,28 @@ def get_results_parameter_scan(
             zipped=True,
         )
     else:
+        size = jl.seval("size(sol)")
+
         if scan.output_func is None:
-            results = np.array(
-                [jl.seval(f"sol.u[{idx + 1}][end]") for idx in range(trajectories)]
-            )
+            if config.save_everystep or saveat_defined or config.save_everystep:
+                raise NotImplementedError(
+                    "Extracting time-dependent results from parameter scans is not yet implemented."
+                )
+
+            if return_2D:
+                results = np.array(
+                    [jl.seval(f"sol.u[{idx + 1}][end]") for idx in range(trajectories)]
+                )
+            else:
+                if config.save_start:
+                    results = np.array(
+                        [
+                            jl.seval(f"sol.u[{idx + 1}][end]")
+                            for idx in range(trajectories)
+                        ]
+                    )
+                else:
+                    results = np.array(jl.seval("sol.u"))
         else:
             results = np.array(jl.seval("sol.u"))
 
@@ -672,7 +704,7 @@ def get_results_parameter_scan(
                 results = results.reshape([len(v) for v in scan.scan_values][::-1]).T
         else:
             results = results.reshape(
-                [len(v) for v in scan.scan_values][::-1] + list(results.shape[1:])
+                list([len(v) for v in scan.scan_values] + list(results.shape[1:]))[::-1]
             ).T
 
         return OBEResultParameterScan(

@@ -8,7 +8,7 @@ readme = "README.md"
 license = "MIT"
 dependencies = [
     "psutil>=5.9.4,<6",
-    "centrex-tlf>=0.1.8.2",
+    "centrex-tlf>=0.1.8.4",
     "juliacall>=0.9.30",
 ]
 

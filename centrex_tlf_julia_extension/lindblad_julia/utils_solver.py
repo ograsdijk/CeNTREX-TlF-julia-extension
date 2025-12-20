@@ -177,14 +177,7 @@ def setup_parameter_scan_zipped(
     else:
         parameters_list = list(parameters)
 
-    # Build params EXACTLY like before
-    if isinstance(values, np.ndarray):
-        if values.ndim == 1:
-            params = values[:, None]
-        else:
-            params = values
-    else:
-        params = np.array(list(zip(*values)))
+    params = np.array(list(zip(*values)))
 
     # Replace scanned parameters with params[i,j]
     pars = list(ode_parameters.p)
@@ -203,9 +196,9 @@ def setup_parameter_scan_zipped(
     _pars = f"({elems[0]},)" if len(elems) == 1 else "(" + ", ".join(elems) + ")"
 
     # Push params to Julia (no const, no renaming)
-    jl.seval(f"params = {params.tolist()}")
+    jl.params = params
     jl.seval("params = collect(params)")
-    jl.seval("@everywhere params = Main.params")
+    jl.seval("@everywhere params = $params")
 
     # Generate prob_func
     if ode_parameters._method == "expanded":
@@ -642,6 +635,13 @@ def get_results_single() -> OBEResult:
     return OBEResult(t, results)
 
 
+def transpose_first_n(a: np.ndarray, n: int) -> np.ndarray:
+    if not (0 <= n <= a.ndim):
+        raise ValueError(f"n must be in [0, {a.ndim}], got {n}")
+    axes = tuple(range(n - 1, -1, -1)) + tuple(range(n, a.ndim))
+    return np.transpose(a, axes)
+
+
 def get_results_parameter_scan(
     scan: OBEEnsembleProblem, config: OBEEnsembleProblemConfig
 ) -> OBEResultParameterScan:
@@ -666,6 +666,8 @@ def get_results_parameter_scan(
 
     # check if returning 2D density matrices
     return_2D = config.save_idxs is None
+
+    scan_shape = [len(v) for v in scan.scan_values]
 
     # check if saving multiple timesteps
     saveat_defined = isinstance(config.saveat, (float, int)) or len(config.saveat) > 0
@@ -713,12 +715,11 @@ def get_results_parameter_scan(
             results = np.array(jl.seval("sol.u"))
 
         if results.ndim == 1:
-            if len(scan.scan_values) != 1:
+            if len(scan.scan_values) > 1:
                 results = results.reshape([len(v) for v in scan.scan_values][::-1]).T
-        else:
-            results = results.reshape(
-                list([len(v) for v in scan.scan_values] + list(results.shape[1:]))[::-1]
-            ).T
+        elif len(scan.scan_values) > 1:
+            results = results.reshape(scan_shape[::-1] + list(results.shape[1:]))
+            results = transpose_first_n(results, n=len(scan.scan_values))
 
         return OBEResultParameterScan(
             parameters=scan.parameters,

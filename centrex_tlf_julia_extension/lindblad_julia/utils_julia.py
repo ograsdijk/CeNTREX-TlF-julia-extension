@@ -26,7 +26,7 @@ def install_packages() -> None:
             jl.Pkg.add(pkg)
 
 
-def initialize_julia(nprocs: int, verbose: bool = True) -> None:
+def initialize_julia(nprocs: int, blas_threads: int = 1, verbose: bool = True) -> None:
     """
     Function to initialize Julia over nprocs processes.
     Creates nprocs processes and loads the necessary Julia
@@ -56,13 +56,14 @@ def initialize_julia(nprocs: int, verbose: bool = True) -> None:
         jl.seval(f"rmprocs({procs})")
 
     jl.seval(
-        """
+        f"""
         @everywhere begin
             using LinearAlgebra
             using LinearAlgebra.BLAS
             using Trapz
             using DifferentialEquations
             using Waveforms
+            LinearAlgebra.BLAS.set_num_threads({blas_threads})
         end
     """
     )

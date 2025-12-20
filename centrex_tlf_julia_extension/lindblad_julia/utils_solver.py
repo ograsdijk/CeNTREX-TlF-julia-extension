@@ -227,26 +227,100 @@ def setup_parameter_scan_zipped(
 def setup_parameter_scan_ND(
     odePar: odeParameters,
     parameters: str | Sequence[str],
-    values: Sequence[npt.NDArray[np.generic]]
-    | npt.NDArray[np.generic]
-    | Sequence[Number],
+    values: (
+        Sequence[npt.NDArray[np.generic]] | npt.NDArray[np.generic] | Sequence[Number]
+    ),
+    name: str = "prob_func",
 ) -> ProblemFunction:
     """
     Convenience function for generating an ND parameter scan.
     For each parameter a list or np.ndarray of values is supplied,
     and each possible combination between all parameters is simulated.
 
-    Args:
-        odePar (odeParameters): object containing all the parameters for
-                                the OBE system.
-        parameters (str | List[str]): strs of parameters to scan over.
-        values (Sequence[npt.NDArray[np.generic]] | npt.NDArray[np.generic]): list or np.ndarray of values to scan over
-                                    for each parameter
-    """
-    # create all possible combinations between parameter values with meshgrid
-    params = np.array(np.meshgrid(*values, indexing="ij")).T.reshape(-1, len(values))
+    Avoids materializing the full Cartesian-product array in NumPy.
+    It transfers only the per-parameter 1D grids to Julia as `params` and computes
+    the per-parameter indices from `i` inside the prob_func using unrolled code
+    (no loop in Julia).
 
-    return setup_parameter_scan_zipped(odePar, parameters, params.T)
+    Ordering matches:
+        np.array(np.meshgrid(*values, indexing="ij")).T.reshape(-1, len(values))
+
+    i.e. the FIRST parameter varies fastest, last parameter slowest.
+    """
+    # Normalize parameters
+    if isinstance(parameters, str):
+        parameters_list = [parameters]
+    else:
+        parameters_list = list(parameters)
+
+    # Normalize values into a list of 1D numpy arrays (one per parameter)
+    if isinstance(values, np.ndarray):
+        values_list = [np.asarray(values)]
+    else:
+        if len(parameters_list) == 1 and (
+            len(values) == 0 or not isinstance(values[0], (np.ndarray, list, tuple))
+        ):
+            values_list = [np.asarray(values)]
+        else:
+            values_list = [np.asarray(v) for v in values]  # type: ignore[arg-type]
+
+    if len(values_list) != len(parameters_list):
+        raise ValueError(
+            f"Expected {len(parameters_list)} value arrays (one per parameter), got {len(values_list)}."
+        )
+
+    lens = [int(len(v)) for v in values_list]
+    if any(L <= 0 for L in lens):
+        raise ValueError("All scan value arrays must be non-empty.")
+
+    # Replace scanned parameters with params[k][idx_k] (computed in Julia)
+    pars = list(odePar.p)
+    for k, par_name in enumerate(parameters_list):
+        idx = odePar.get_index_parameter(par_name)
+        assert isinstance(idx, int)
+        pars[idx] = f"params[{k + 1}][idx_{k + 1}]"
+
+    # Build p tuple EXACTLY like generate_p_julia, but allow strings to pass through
+    elems = [pi if isinstance(pi, str) else julia_literal(pi) for pi in pars]
+    _pars = f"({elems[0]},)" if len(elems) == 1 else "(" + ", ".join(elems) + ")"
+
+    # Push only the 1D grids to Julia, keep name `params`
+    jl.params = values_list
+    jl.seval("params = map(collect, params)")
+    jl.seval("@everywhere params = $params")
+
+    # Unrolled mixed-radix indexing matching NumPy meshgrid(...).T.reshape order:
+    # FIRST parameter varies fastest.
+    idx_lines: list[str] = ["idx0 = i - 1"]
+    for k in range(1, len(lens) + 1):
+        Lk = lens[k - 1]
+        idx_lines.append(f"idx_{k} = (idx0 % {Lk}) + 1")
+        idx_lines.append(f"idx0 = idx0 ÷ {Lk}")
+    idx_block = "\n            ".join(idx_lines)
+
+    if odePar._method == "expanded":
+        function_str = f"""
+        @everywhere function {name}(prob, i, repeat)
+            {idx_block}
+            remake(prob, p = {_pars})
+        end
+        """
+    elif odePar._method == "matrix":
+        function_str = f"""
+        @everywhere function {name}(prob, i, repeat)
+            {idx_block}
+            p_values = {_pars}
+            HamFun = HamFunctor(p_values...)
+            p_new = LindbladParameters(HamFun, DissFun, buf)
+            remake(prob, p = p_new)
+        end
+        """
+    else:
+        raise ValueError(f"method {odePar._method} not supported")
+
+    jl.seval(function_str)
+    function_str = remove_leading_spaces_to_align(function_str)
+    return ProblemFunction(name=name, function=function_str)
 
 
 def setup_ratio_calculation_state_idxs(
@@ -588,9 +662,14 @@ def solve_problem(
 def _generate_problem_parameter_scan_solve_string(
     problem: OBEEnsembleProblem, config: OBEEnsembleProblemConfig
 ) -> str:
-    trajectories = (
-        "size(params)[1]" if config.trajectories is None else str(config.trajectories)
-    )
+    if config.trajectories is None:
+        if problem.zipped:
+            trajectories = str(len(problem.scan_values[0]))
+        else:
+            trajectories = str(int(np.prod([len(v) for v in problem.scan_values])))
+    else:
+        trajectories = str(config.trajectories)
+
     save_idxs = "nothing" if config.save_idxs is None else str(config.save_idxs)
 
     callback = "nothing" if config.callback is None else config.callback.name
@@ -620,7 +699,7 @@ def solve_problem_parameter_scan(
     config: OBEEnsembleProblemConfig = OBEEnsembleProblemConfig(),
 ) -> None:
     solve_string = _generate_problem_parameter_scan_solve_string(problem, config)
-    jl.seval(f"{solve_string}; tmp=0;")
+    jl.seval(f"{solve_string};")
 
 
 def get_results_single() -> OBEResult:

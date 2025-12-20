@@ -15,67 +15,50 @@ commutator_nargs: dict[str, int] = {
 }
 
 
-def hamiltonian_functor(hamiltonian_signature: smp.Function) -> str:
-    """Generate Julia code for a Hamiltonian functor struct.
-
-    Creates a Julia callable struct that wraps the Hamiltonian function,
-    storing parameters as struct fields for efficient repeated evaluation.
-    The functor is compatible with the ODE solver interface (du, t) signature.
-
-    Args:
-        hamiltonian_signature: SymPy function representing the Hamiltonian
-            signature. Should have arguments including 'du' (output), 't' (time),
-            and any parameters.
-
-    Returns:
-        Julia code string defining:
-            - HamFunctor{T} struct with parameter fields
-            - Callable (h::HamFunctor)(du, t) method
-
-    Example:
-        >>> # For hamiltonian!(du, Omega, Delta, t)
-        >>> sig = smp.Function('hamiltonian!')(du, Omega, Delta, t)
-        >>> code = ham_functor(sig)
-        >>> print(code)
-        struct HamFunctor{T}
-            Omega::T
-            Delta::T
-        end
-
-        @inline function (h::HamFunctor)(du, t)
-            hamiltonian!(du, h.Omega, h.Delta, t)
-            return nothing
-        end
-    """
+def hamiltonian_functor(
+    hamiltonian_signature: smp.Function,
+    odepars: odeParameters,
+    struct_name: str = "HamFunctor",
+    call_name: str = "hamiltonian!",
+) -> str:
     args = hamiltonian_signature.args
 
     def get_name(arg: smp.Basic) -> str:
         if isinstance(arg, smp.Symbol):
             return arg.name
-        raise TypeError("Expected sympy.Symbol in function arguments.")
+        raise TypeError(f"Expected sympy.Symbol in function arguments, got {type(arg)}")
 
-    # Build struct fields for parameters (excluding 'du' and 't')
-    args_struct = "\n".join(
-        [f"    {get_name(arg)}::T" for arg in args if get_name(arg) not in ["du", "t"]]
+    name_to_type: dict[str, str] = dict(
+        zip(odepars._parameters, odepars._parameter_types)
     )
-    # Build function call with struct fields (h.param) for parameters
+
+    param_names = [get_name(a) for a in args if get_name(a) not in {"du", "t"}]
+
+    missing = [n for n in param_names if n not in name_to_type]
+    if missing:
+        raise KeyError(f"Missing parameter types for: {', '.join(missing)}")
+
+    args_struct = "\n".join(
+        [f"    {name}::{name_to_type[name]}" for name in param_names]
+    )
+
     args_func = ", ".join(
         [
-            f"h.{get_name(arg)}" if get_name(arg) not in ["du", "t"] else get_name(arg)
-            for arg in args
+            (f"h.{get_name(a)}" if get_name(a) not in {"du", "t"} else get_name(a))
+            for a in args
         ]
     )
-    ham_functor_code = f"""
-struct HamFunctor{{T}}
+
+    return f"""
+struct {struct_name}
 {args_struct}
 end
 
-@inline function (h::HamFunctor)(du, t)
-    hamiltonian!({args_func})
+@inline function (h::{struct_name})(du, t)
+    {call_name}({args_func})
     return nothing
 end
 """
-    return ham_functor_code
 
 
 def lindblad_function_and_parameters(commutator_name: str) -> str:
@@ -188,8 +171,7 @@ end
 
 
 def generate_code_matrix_method(
-    commutator_name: str,
-    ham_signature: smp.Function,
+    commutator_name: str, ham_signature: smp.Function, odepars: odeParameters
 ) -> str:
     """Generate complete Julia code for matrix-based Lindblad equation.
 
@@ -221,7 +203,7 @@ def generate_code_matrix_method(
         >>> # LindbladParameters, and lindblad! function
     """
     return (
-        hamiltonian_functor(ham_signature)
+        hamiltonian_functor(ham_signature, odepars)
         + "\n"
         + dissipator_functor()
         + "\n"

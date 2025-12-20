@@ -137,7 +137,7 @@ def generate_OBE_system_julia(
         )
         lindblad = lindblad_function_and_parameters("liouvillian_commutator_her2k!")
 
-        ham_functor_code = hamiltonian_functor(hamiltonian_signature)
+        ham_functor_code = hamiltonian_functor(hamiltonian_signature, ode_parameters)
         diss_functor_code = dissipator_functor()
 
         # reorder ode parameters to match Hamiltonian signature

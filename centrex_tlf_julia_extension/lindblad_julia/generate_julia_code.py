@@ -3,6 +3,7 @@ from typing import List, Sequence
 
 import sympy as smp
 from centrex_tlf import couplings
+from sympy import MutableDenseMatrix
 from sympy.parsing import sympy_parser
 from sympy.printing.julia import julia_code
 
@@ -14,41 +15,40 @@ __all__ = ["system_of_equations_to_lines", "generate_preamble"]
 def generate_preamble(
     odepars: odeParameters, transition_selectors: Sequence[couplings.TransitionSelector]
 ) -> str:
-    # check if the symbols in transitions are defined by odepars
     odepars.check_transition_symbols(transition_selectors)
+
     preamble = """function Lindblad_rhs!(du, ρ, p, t)
-    \t@inbounds begin
-    """
-    for idp, par in enumerate(odepars._parameters):
-        preamble += f"\t\t{par} = p[{idp + 1}]\n"
+\t@inbounds begin
+"""
+
+    # Bind parameters from p with explicit types
+    for idp, (par, par_type) in enumerate(
+        zip(odepars._parameters, odepars._parameter_types), start=1
+    ):
+        preamble += f"\t\t{par}::{par_type} = p[{idp}]\n"
+
+    # Compound vars
     for par in odepars._compound_vars:
         sympy_expr = sympy_parser.parse_expr(getattr(odepars, par))
         julia_expr = julia_code(sympy_expr, strict=False)
         clean = "\n".join(
             line for line in julia_expr.splitlines() if not line.strip().startswith("#")
         )
-
         preamble += f"\t\t{par} = {clean}\n"
 
-    # remove duplicate lines (if multiple transitions have the same Rabi rate symbol or
-    # detuning
+    # Remove duplicate lines (same as before)
     preamble = "\n".join(list(OrderedDict.fromkeys(preamble.split("\n"))))
 
-    # for a list of lists type inference doesn't work, setting types explicitly
-    if "Array" in odepars._parameter_types:
-        for transition in transition_selectors:
-            preamble = preamble.replace(
-                f"{transition.Ω} ", f"{transition.Ω}::ComplexF64 "
-            )
-        for par_type, par in zip(odepars._parameter_types, odepars._parameters):
-            if par_type == "Array":
-                par_type = f"Array{{{odepars._array_types.get(par)},1}}"
-            preamble = preamble.replace(f"{par} ", f"{par}::{par_type} ")
+    # If you still need to force Ω symbols to ComplexF64, do it directly
+    # (only if those Ω variables appear as bare identifiers in the generated lines)
+    for transition in transition_selectors:
+        preamble = preamble.replace(f"{transition.Ω} ", f"{transition.Ω}::ComplexF64 ")
+
     return preamble
 
 
 def system_of_equations_to_lines(
-    system: smp.matrices.dense.MutableDenseMatrix,
+    system: MutableDenseMatrix,
     transition_selectors: Sequence[couplings.TransitionSelector],
 ) -> List[str]:
     n_states = system.shape[0]

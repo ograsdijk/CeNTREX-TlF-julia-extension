@@ -1,3 +1,5 @@
+import numbers
+from collections.abc import Sequence
 from typing import Any, List, Optional, Sequence, Set, Union
 
 import numpy as np
@@ -19,10 +21,114 @@ type_conv = {
     "complex": "ComplexF64",
     "float64": "Float64",
     "int32": "Int32",
+    "int64": "Int64",
+    "complex64": "ComplexF32",
     "complex128": "ComplexF64",
-    "list": "Array",
-    "ndarray": "Array",
+    "float32": "Float32",
+    "float16": "Float16",
 }
+
+
+def is_sequence(x: Any) -> bool:
+    # Accept 1D numpy arrays as sequences
+    if isinstance(x, np.ndarray):
+        return x.ndim == 1
+    return isinstance(x, Sequence) and not isinstance(x, (str, bytes, bytearray))
+
+
+def is_homogeneous_sequence(x: Any) -> bool:
+    if not is_sequence(x):
+        return False
+
+    # normalize to something indexable for both list/tuple and ndarray
+    if isinstance(x, np.ndarray):
+        if x.size == 0:
+            return False
+        # for numpy arrays, homogeneity is about dtype
+        return True
+
+    if len(x) == 0:
+        return False
+
+    t0 = type(x[0])
+    return all(type(e) is t0 for e in x)
+
+
+def _type_key(value: Any) -> str:
+    # NumPy scalar (np.float64, np.int32, np.complex128, etc.)
+    if isinstance(value, np.generic):
+        return value.dtype.name
+    # 0-d numpy array, if that can occur
+    if isinstance(value, np.ndarray) and value.ndim == 0:
+        return value.dtype.name
+    # Python scalar: 'int', 'float', 'complex', 'bool', ...
+    return type(value).__name__
+
+
+def type_conversion(value: Any, type_conv: dict[str, str]) -> str:
+    if is_sequence(value):
+        if not is_homogeneous_sequence(value):
+            raise TypeError("Inhomogeneous sequences are not supported")
+
+        if isinstance(value, np.ndarray):
+            N = int(value.size)
+            # map by dtype name for arrays
+            key = value.dtype.name
+        else:
+            N = len(value)
+            key = _type_key(value[0])
+
+        julia_type = type_conv.get(key)
+        if julia_type is None:
+            raise TypeError(f"Type {key} not supported for odeParameters")
+
+        return f"NTuple{{{N},{julia_type}}}"
+
+    # numeric scalar (includes numpy scalar)
+    if isinstance(value, numbers.Number) or isinstance(value, np.generic):
+        key = _type_key(value)
+        julia_type = type_conv.get(key)
+        if julia_type is None:
+            raise TypeError(f"Type {key} not supported for odeParameters")
+        return julia_type
+
+    raise TypeError(f"Type {_type_key(value)} not supported for odeParameters")
+
+
+def julia_literal(value: Any) -> str:
+    """Convert python/numpy scalar or 1D sequence into a Julia literal."""
+    # numpy scalar -> python scalar
+    if isinstance(value, np.generic):
+        value = value.item()
+
+    if is_sequence(value):
+        if isinstance(value, np.ndarray):
+            elems = [julia_literal(x.item()) for x in value.ravel()]
+        else:
+            elems = [julia_literal(x) for x in value]
+
+        # Julia tuple literal
+        if len(elems) == 1:
+            return f"({elems[0]},)"  # 1-tuple needs trailing comma
+        return "(" + ", ".join(elems) + ")"
+
+    # scalar literals
+    if isinstance(value, bool):
+        return "true" if value else "false"
+
+    if isinstance(value, complex):
+        # Julia: a + b*im
+        a = value.real
+        b = value.imag
+        return f"({a}) + ({b})*im"
+
+    if isinstance(value, (int, float)):
+        # str() is fine here; if you care about Float64 formatting, do it upstream
+        return str(value)
+
+    raise TypeError(
+        f"Cannot convert value of type {type(value).__name__} to Julia literal"
+    )
 
 
 class odeParameters:
@@ -64,13 +170,14 @@ class odeParameters:
         # storing the input types here for use in generate_preamble, but this is
         # only used if one of the input parameters is an array
         self._parameter_types = [
-            type_conv.get(type(getattr(self, par)).__name__) for par in self._parameters
+            type_conversion(getattr(self, par), type_conv) for par in self._parameters
         ]
-        self._array_types = dict(
-            (par, type_conv.get(type(getattr(self, par)[0]).__name__))
+
+        self._array_types = {
+            par: type_conversion(getattr(self, par), type_conv)
             for par in self._parameters
-            if type_conv.get(type(getattr(self, par)).__name__) == "Array"
-        )
+            if is_sequence(getattr(self, par))
+        }
         self._method = "expanded"
 
     def __setattr__(self, name: str, value: Any) -> None:
@@ -246,28 +353,31 @@ class odeParameters:
             raise AssertionError(warn_string.strip(" ,"))
         return True
 
-    def generate_p_julia(self) -> None:
-        jl_string = (
-            "("
-            + ",".join(
-                [
-                    repr(pi).replace("array", "").replace("(", "").replace(")", "")
-                    # .replace("[", "(")
-                    # .replace("]", ")")
-                    if type(pi) == np.ndarray
-                    else str(pi)
-                    for pi in self.p
-                ]
-            ).replace("\n", "")
-            + ")"
-        )
+    def generate_p_julia(self) -> str:
+        elems = [julia_literal(pi) for pi in self.p]
+        if len(elems) == 1:
+            jl_string = f"({elems[0]},)"
+        else:
+            jl_string = "(" + ", ".join(elems) + ")"
 
         if self._method == "expanded":
+            # Define p directly
             jl.seval(f"p = {jl_string}")
+
         elif self._method == "matrix":
-            jl.seval(f"p_values = {jl_string}")
-            jl.seval("HamFun = HamFunctor(p_values...)")
-            jl.seval("p = LindbladParameters(HamFun, DissFun, buf)")
+            # One seval, avoid intermediate globals where possible
+            jl.seval(
+                f"""
+                p_values = {jl_string}
+                HamFun = HamFunctor(p_values...)
+                p = LindbladParameters(HamFun, DissFun, buf)
+                """
+            )
+
+        else:
+            raise ValueError(f"Unknown method: {self._method!r}")
+
+        return jl_string
 
     def __repr__(self) -> str:
         rep = "OdeParameters("
@@ -434,4 +544,5 @@ def generate_ode_parameters(
     if kwargs is not None:
         for key, val in kwargs.items():
             parameters_dict[key] = val
+    return odeParameters(**parameters_dict)
     return odeParameters(**parameters_dict)

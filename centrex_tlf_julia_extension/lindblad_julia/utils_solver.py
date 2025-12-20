@@ -6,7 +6,7 @@ import numpy as np
 import numpy.typing as npt
 from sympy.parsing import sympy_parser
 
-from .ode_parameters import odeParameters
+from .ode_parameters import julia_literal, odeParameters
 from .utils_julia import jl
 
 numeric = int | float | complex
@@ -162,7 +162,7 @@ def setup_initial_condition_scan(
 
 def setup_parameter_scan_zipped(
     ode_parameters: odeParameters,
-    parameters: str | Sequence[str],
+    parameters: str | Sequence[str | Sequence[str]],
     values: Sequence[npt.NDArray[np.generic]] | npt.NDArray[np.generic],
     name: str = "prob_func",
 ) -> ProblemFunction:
@@ -170,56 +170,53 @@ def setup_parameter_scan_zipped(
     Convenience function for initializing a 1D parameter scan over
     multiple parameters, with each parameter scanning over a different
     set of parameters.
-
-    Args:
-        odePar (odeParameters): object containing all the parameters
-                                for the OBE system.
-        parameters (Sequence[str] | str): list of parameters to scan over
-        values (Sequence[npt.NDArray[np.generic]] | npt.NDArray[np.generic]): list/array of values to scan over.
-        name (str): name of the problem function
     """
-    # get the indices of each parameter that is scanned over,
-    # as defined in odePars. If a parameter is not scanned over,
-    # use the variable definition
+    # Normalize parameters
+    if isinstance(parameters, str):
+        parameters_list = [parameters]
+    else:
+        parameters_list = list(parameters)
+
+    # Build params EXACTLY like before
+    if isinstance(values, np.ndarray):
+        if values.ndim == 1:
+            params = values[:, None]
+        else:
+            params = values
+    else:
+        params = np.array(list(zip(*values)))
+
+    # Replace scanned parameters with params[i,j]
     pars = list(ode_parameters.p)
-    for idN, parameter in enumerate(parameters):
+    for idN, parameter in enumerate(parameters_list):
         if isinstance(parameter, (list, tuple)):
             indices = [ode_parameters.get_index_parameter(par) for par in parameter]
         else:
             indices = [ode_parameters.get_index_parameter(parameter)]
+
         for idx in indices:
             assert isinstance(idx, int)
             pars[idx] = f"params[i,{idN + 1}]"
-    params = np.array(list(zip(*values)))
 
-    _pars = (
-        "("
-        + ",".join(
-            [
-                repr(pi).replace("array", "").replace("(", "").replace(")", "")
-                if type(pi) == np.ndarray
-                else str(pi)
-                for pi in pars
-            ]
-        )
-        + ")"
-    )
+    # Build _pars EXACTLY like generate_p_julia, but allow strings to pass through
+    elems = [pi if isinstance(pi, str) else julia_literal(pi) for pi in pars]
+    _pars = f"({elems[0]},)" if len(elems) == 1 else "(" + ", ".join(elems) + ")"
 
-    jl.params = params
+    # Push params to Julia (no const, no renaming)
+    jl.seval(f"params = {params.tolist()}")
     jl.seval("params = collect(params)")
-    jl.seval("@everywhere params = $params")
+    jl.seval("@everywhere params = Main.params")
 
-    # generate prob_func which remakes the ODE problem for
-    # each different parameter set
+    # Generate prob_func
     if ode_parameters._method == "expanded":
         function_str = f"""
-        @everywhere function prob_func(prob, i, repeat)
+        @everywhere function {name}(prob, i, repeat)
             remake(prob, p = {_pars})
         end
         """
     elif ode_parameters._method == "matrix":
         function_str = f"""
-        @everywhere function prob_func(prob, i, repeat)
+        @everywhere function {name}(prob, i, repeat)
             p_values = {_pars}
             HamFun = HamFunctor(p_values...)
             p_new = LindbladParameters(HamFun, DissFun, buf)
@@ -230,7 +227,6 @@ def setup_parameter_scan_zipped(
         raise ValueError(f"method {ode_parameters._method} not supported")
 
     jl.seval(function_str)
-
     function_str = remove_leading_spaces_to_align(function_str)
     return ProblemFunction(name=name, function=function_str)
 

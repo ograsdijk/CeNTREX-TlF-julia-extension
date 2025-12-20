@@ -82,38 +82,61 @@ using Distributed
         return ifelse(frac < duty, 1.0, 0.0)
     end
 
-    """
-        variable_on_off_duty(t::Float64, duty::Float64, T::Float64, ω::Float64, phase::Float64)::Float64
 
-    Periodic on/off gate.
+    const INV_2PI = 1.0 / (2π)
+    """
+        variable_on_off_duty_invT(t::Float64, duty::Float64, invT::Float64, phase::Float64) -> Float64
+
+    Periodic on/off gate (fast form).
 
     - `duty`  : duty cycle in [0, 1] (fraction of the period that is ON)
-    - `T`     : period
-    - `ω`     : angular frequency (typically 2π / T)
+    - `invT`  : inverse period, `1/T`
     - `phase` : phase offset [rad]
 
-    Returns 1.0 during the ON portion of the cycle and 0.0 otherwise.
+    This version is optimized for tight inner loops: pass `invT = 1/T` (and usually a constant `phase`)
+    precomputed outside the ODE RHS. Returns `1.0` during the ON portion of the cycle and `0.0` otherwise.
     """
-    @inline function variable_on_off_duty(
+    @inline function variable_on_off_duty_invT(
         t::Float64,
         duty::Float64,
-        T::Float64,
-        ω::Float64,
+        invT::Float64,
         phase::Float64,
     )::Float64
-        frac = mod(ω * t + phase, 2π) * (1 / (2π))
+        frac = mod1(t * invT + phase * INV_2PI, 1.0)  # in (0,1]
         return ifelse(frac < duty, 1.0, 0.0)
     end
 
     """
-        multipass_2d_intensity(x::Float64, y::Float64, amplitudes::Vector{Float64}, xlocs::Vector{Float64}, ylocs::Vector{Float64}, σx::Float64, σy::Float64)::Float64
+        multipass_2d_intensity(x, y, amplitudes, xlocs, ylocs, σx, σy) -> Float64
 
-    generate a multipass with 2D gaussian intensity profiles for each pass
+    Compute the total intensity from a multipass consisting of 2D Gaussian profiles.
+
+    Each pass `i` contributes `gaussian_2d(x, y, amplitudes[i], xlocs[i], ylocs[i], σx, σy)`,
+    and the result is summed over `i`. The containers `amplitudes`, `xlocs`, and `ylocs`
+    may be any indexable collections with matching indices (e.g. `NTuple`, `Vector`,
+    `SVector`).
+
+    # Arguments
+    - `x`, `y`: transverse coordinates.
+    - `amplitudes`: per-pass amplitudes.
+    - `xlocs`, `ylocs`: per-pass beam centers.
+    - `σx`, `σy`: Gaussian widths.
+
+    # Returns
+    - Total intensity at `(x, y)` as `Float64`.
     """
-    function multipass_2d_intensity(x::Float64, y::Float64, amplitudes::Vector{Float64}, xlocs::Vector{Float64}, ylocs::Vector{Float64}, σx::Float64, σy::Float64)::Float64
+    function multipass_2d_intensity(
+        x::Float64,
+        y::Float64,
+        amplitudes,
+        xlocs,
+        ylocs,
+        σx::Float64,
+        σy::Float64,
+    )::Float64
         intensity::Float64 = 0.0
-        for i = 1:length(amplitudes::Vector{Float64})
-            @inbounds intensity += gaussian_2d(x,y,amplitudes[i],xlocs[i],ylocs[i], σx,σy)
+        @inbounds for i in eachindex(amplitudes, xlocs, ylocs)
+            intensity += gaussian_2d(x, y, amplitudes[i], xlocs[i], ylocs[i], σx, σy)
         end
         return intensity
     end
@@ -134,14 +157,24 @@ using Distributed
     end
 
     """
-    multipass_2d_rabi(x::Float64, y::Float64, intensities::Vector{Float64}, xlocs::Vector{Float64}, ylocs::Vector{Float64}, σx::Float64, σy::Float64, main_coupling::Float64, D::Float64=2.6675506e-30)::Float64
-        generate a multipass with 2D intensity profiles for each pass and convert to a rabi rate for with
-        the default D set for the X to B TlF transition.
+        multipass_2d_rabi(x, y, intensities, xlocs, ylocs, σx, σy, main_coupling; D=2.6675506e-30) -> Float64
+
+    Generate a multipass with 2D intensity profiles for each pass and convert it to a Rabi rate.
+    Default `D` is set for the X→B TlF transition.
     """
-    function multipass_2d_rabi(x::Float64, y::Float64, intensities::Vector{Float64}, xlocs::Vector{Float64}, ylocs::Vector{Float64}, σx::Float64, σy::Float64, main_coupling::Float64, D::Float64=2.6675506e-30)::Float64
+    @inline function multipass_2d_rabi(
+        x::Float64,
+        y::Float64,
+        intensities,
+        xlocs,
+        ylocs,
+        σx::Float64,
+        σy::Float64,
+        main_coupling::Float64,
+        D::Float64 = 2.6675506e-30,
+    )::Float64
         intensity = multipass_2d_intensity(x, y, intensities, xlocs, ylocs, σx, σy)
-        Ω = rabi_from_intensity(intensity, main_coupling, D)
-        return Ω
+        return rabi_from_intensity(intensity, main_coupling, D)
     end
 
     """

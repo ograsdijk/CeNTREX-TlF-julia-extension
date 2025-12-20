@@ -187,6 +187,23 @@ using Distributed
         return rabi
     end
 
+    """
+        alternating_sign(x::Real, x0::Real, w::Real) -> Int
+
+    Return +1 or -1, alternating every interval of width `w`,
+    starting at position `x0`.
+
+    Examples:
+        x ∈ [x0, x0+w)     → +1
+        x ∈ [x0+w, x0+2w)  → -1
+        x ∈ [x0+2w, x0+3w) → +1
+        ...
+    """
+    function alternating_sign(x::Real, x0::Real, w::Real)::Int
+        n = floor(Int, (x - x0) / w)
+        return iseven(n) ? 1 : -1
+    end
+
     function mirror_hermitian!(C::StridedMatrix{T}, uplo::Char = 'U') where {T<:Complex}
         n = size(C, 1)
         @inbounds if uplo == 'U'

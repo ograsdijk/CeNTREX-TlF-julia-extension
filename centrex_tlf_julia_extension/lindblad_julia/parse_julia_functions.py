@@ -17,6 +17,7 @@ julia_functions = [
     "multipass_2d_rabi",
     "gaussian_beam_rabi",
     "variable_on_off_duty",
+    "alternating_sign",
 ]
 
 

@@ -1,5 +1,5 @@
 from .utils_julia import jl
-from .utils_solver import OBEEnsembleProblem, OBEEnsembleProblemConfig
+from .utils_solver import OBEEnsembleProblem, OBEEnsembleProblemConfig, _julia_saveat_arg
 
 __all__ = ["solve_problem_parameter_scan_progress"]
 
@@ -24,9 +24,20 @@ def solve_problem_parameter_scan_progress(
     save_everystep = config.save_everystep
     output_func = problem.output_func
 
-    _trajectories = "size(params)[1]" if trajectories is None else trajectories
-    _callback = "nothing" if callback is None else callback
-    _saveat = "[]" if saveat is None else str(saveat)
+    if trajectories is None:
+        if problem.zipped:
+            _trajectories = "size(params, 1)"
+        else:
+            _trajectories = "prod(length.(params))"
+    else:
+        _trajectories = str(trajectories)
+
+    _callback = "nothing" if callback is None else callback.name
+
+    # Ensure saveat is Julia-native for distributed workers; omit if unset.
+    _saveat = _julia_saveat_arg(saveat)
+    _saveat_kw = "" if _saveat is None else f"saveat = {_saveat},"
+
     _save_idxs = "nothing" if save_idxs is None else str(save_idxs)
 
     if output_func is None:
@@ -39,11 +50,12 @@ def solve_problem_parameter_scan_progress(
         """
         )
     else:
+        out_name = output_func.name
         jl.seval(
             f"""
             @everywhere function output_func_progress(sol, i)
                 put!(channel, 1)
-                a,b = {output_func}(sol, i)
+                a,b = {out_name}(sol, i)
                 return a,b
             end
         """
@@ -83,7 +95,7 @@ def solve_problem_parameter_scan_progress(
                             abstol = {abstol}, reltol = {reltol},
                             callback = {_callback},
                             save_everystep = {str(save_everystep).lower()},
-                            saveat = {_saveat},
+                            {_saveat_kw}
                             save_idxs = {_save_idxs})
             end
     end

@@ -490,21 +490,29 @@ class odeParameters:
 
     def reorder(self, order: Sequence[str]) -> None:
         """Reorder the parameters in odeParameters according to order"""
-        new_order = []
-        if not isinstance(order, (list, tuple, np.ndarray, set)):
-            raise TypeError("order must be a sequence of parameter names")
-        order_set = set(order)
-        missing = set(self._parameters) - order_set
-        if missing:
-            raise ValueError(
-                f"Parameter(s) not present in order: {', '.join(sorted(missing))}"
+        if not isinstance(order, (list, tuple, np.ndarray)):
+            raise TypeError(
+                "order must be a sequence of parameter names (list/tuple/ndarray)"
             )
 
-        for par in order:
-            if par not in self._parameters:
-                raise ValueError(f"Parameter {par} not found in odeParameters")
-            new_order.append(par)
-        self._parameters = new_order
+        order_list = list(order)
+
+        if len(order_list) != len(set(order_list)):
+            raise ValueError("order contains duplicate parameter names")
+
+        current_set = set(self._parameters)
+        order_set = set(order_list)
+        if order_set != current_set:
+            missing = current_set - order_set
+            extra = order_set - current_set
+            parts: list[str] = []
+            if missing:
+                parts.append("missing: " + ", ".join(sorted(missing)))
+            if extra:
+                parts.append("unknown: " + ", ".join(sorted(extra)))
+            raise ValueError(f"Invalid order ({'; '.join(parts)})")
+
+        self._parameters = order_list
 
 
 def generate_ode_parameters(

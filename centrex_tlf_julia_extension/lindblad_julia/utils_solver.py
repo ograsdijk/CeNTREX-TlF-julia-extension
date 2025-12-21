@@ -129,6 +129,55 @@ def remove_leading_spaces_to_align(multiline_string: str) -> str:
     return "\n".join(aligned_lines)
 
 
+def _set_julia_var(name: str, value: object) -> str:
+    """Assign a value into Julia Main and return the Julia identifier.
+
+    Note: Avoid passing PythonCall-wrapped objects to Julia `Distributed` workers.
+    """
+    setattr(jl, name, value)
+    return name
+
+
+def _julia_saveat_arg(saveat: object) -> str | None:
+    """Return a Julia expression for `saveat`, or `None` to omit it.
+
+    Notes:
+    - SciML's `solve` does *not* accept `saveat = nothing` (it calls `isempty(saveat)`).
+      Omission means "no saveat".
+    - For distributed ensemble solves, `saveat` must be a Julia scalar or Julia vector
+      (not a PythonCall `PyList`), so we eagerly convert sequences on the master.
+    """
+    if saveat is None:
+        return None
+
+    # normalize numpy scalars
+    if isinstance(saveat, np.generic):
+        saveat = saveat.item()
+
+    # scalar saveat
+    if isinstance(saveat, Number):
+        return julia_literal(saveat)
+
+    # empty sequence => omit
+    if isinstance(saveat, np.ndarray):
+        if saveat.size == 0:
+            return None
+    elif isinstance(saveat, Sequence) and not isinstance(saveat, (str, bytes)):
+        if len(saveat) == 0:
+            return None
+    else:
+        raise TypeError(
+            f"saveat must be a number or 1D sequence, got {type(saveat).__name__}"
+        )
+
+    # Convert Python sequence -> Julia Vector{Float64} on the master process.
+    # This avoids sending PythonCall objects to Distributed workers.
+    jl.seval("import PythonCall")
+    jl._saveat_py = saveat
+    jl.seval("_saveat = PythonCall.pyconvert(Vector{Float64}, _saveat_py)")
+    return "_saveat"
+
+
 def get_diagonal_indices_flattened(
     size: int, states: None | Sequence[int] = None, mode: str = "python"
 ) -> list[int]:
@@ -628,6 +677,8 @@ def _generate_problem_solve_string(
     save_idxs = "nothing" if config.save_idxs is None else str(config.save_idxs)
     force_dtmin = "false" if config.dtmin == 0 else "true"
     callback = "nothing" if config.callback is None else config.callback.name
+    saveat_expr = _julia_saveat_arg(config.saveat)
+    saveat_line = "" if saveat_expr is None else f"        saveat={saveat_expr},\n"
     solve_string = f"""
     sol = solve(
         {problem.name},
@@ -637,7 +688,7 @@ def _generate_problem_solve_string(
         abstol={config.abstol},
         reltol={config.reltol},
         callback={callback},
-        saveat={config.saveat},
+{saveat_line}
         save_idxs={save_idxs},
         dtmin={config.dtmin},
         force_dtmin={force_dtmin},
@@ -674,6 +725,9 @@ def _generate_problem_parameter_scan_solve_string(
 
     callback = "nothing" if config.callback is None else config.callback.name
 
+    saveat_expr = _julia_saveat_arg(config.saveat)
+    saveat_line = "" if saveat_expr is None else f"        saveat = {saveat_expr},\n"
+
     solve_string = f"""
     sol = solve(
         {problem.name},
@@ -685,7 +739,7 @@ def _generate_problem_parameter_scan_solve_string(
         trajectories = {trajectories},
         callback = {callback},
         save_everystep = {str(config.save_everystep).lower()},
-        saveat = {config.saveat},
+{saveat_line}
         save_idxs = {save_idxs},
         dense = {str(config.dense).lower()},
         save_start = {str(config.save_start).lower()}
@@ -708,10 +762,42 @@ def get_results_single() -> OBEResult:
     Returns:
         tuple: OBEResult dataclass with the solution of the OBE for a single trajectory
     """
-    y = np.array([np.array(mat) for mat in jl.seval("sol[:]")])
-    results = np.real(np.einsum("jji->ji", y.T))
+    # Extract populations (real diagonal) in Julia and transfer once.
+    results = np.array(jl.seval("reduce(hcat, [real(diag(u)) for u in sol.u])"))
     t = np.array(jl.seval("sol.t"))
     return OBEResult(t, results)
+
+
+def _get_ensemble_final_states_vecs() -> np.ndarray:
+    """Return a 2D array of vectorized final states: shape (state_len, trajectories)."""
+    return np.array(
+        jl.seval(
+            "reduce(hcat, [vec(sol.u[i][end]) for i in eachindex(sol.u)])"
+        )
+    )
+
+
+def _get_ensemble_final_states_mats() -> np.ndarray:
+    """Return a 3D array of final density matrices: shape (trajectories, n, n).
+
+    This matches the previous behavior of stacking `sol.u[i][end]` matrices in Python,
+    but does it in Julia in one call (and avoids vec/reshape layout pitfalls).
+    """
+    return np.array(
+        jl.seval(
+            """
+            let ntraj = length(sol.u)
+                A0 = sol.u[1][end]
+                n1, n2 = size(A0)
+                A = Array{eltype(A0)}(undef, ntraj, n1, n2)
+                @inbounds for i in 1:ntraj
+                    A[i, :, :] = sol.u[i][end]
+                end
+                A
+            end
+            """
+        )
+    )
 
 
 def transpose_first_n(a: np.ndarray, n: int) -> np.ndarray:
@@ -756,9 +842,11 @@ def get_results_parameter_scan(
                 raise NotImplementedError(
                     "Extracting time-dependent results from parameter scans is not yet implemented."
                 )
-            results = np.array(
-                [jl.seval(f"sol.u[{idx + 1}][end]") for idx in range(trajectories)]
-            )
+            if return_2D:
+                results = _get_ensemble_final_states_mats()
+            else:
+                vecs = _get_ensemble_final_states_vecs()
+                results = vecs.T
         else:
             results = np.array(jl.seval("sol.u"))
         return OBEResultParameterScan(
@@ -768,28 +856,17 @@ def get_results_parameter_scan(
             zipped=True,
         )
     else:
-        size = jl.seval("size(sol)")
-
         if scan.output_func is None:
             if config.save_everystep or saveat_defined or config.save_everystep:
                 raise NotImplementedError(
                     "Extracting time-dependent results from parameter scans is not yet implemented."
                 )
-
             if return_2D:
-                results = np.array(
-                    [jl.seval(f"sol.u[{idx + 1}][end]") for idx in range(trajectories)]
-                )
+                results = _get_ensemble_final_states_mats()
             else:
-                if config.save_start:
-                    results = np.array(
-                        [
-                            jl.seval(f"sol.u[{idx + 1}][end]")
-                            for idx in range(trajectories)
-                        ]
-                    )
-                else:
-                    results = np.array(jl.seval("sol.u"))
+                # For save_idxs results, keep (trajectories, n_saved)
+                vecs = _get_ensemble_final_states_vecs()
+                results = vecs.T
         else:
             results = np.array(jl.seval("sol.u"))
 
